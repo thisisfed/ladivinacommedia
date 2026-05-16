@@ -50,130 +50,219 @@
     }
     </script>
   
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script>
+  /* Smooth-scroll helper — replaces jQuery's $.animate({scrollTop}, ms).
+     Cancels any in-flight animation on the same element so successive
+     calls don't fight (equivalent to jQuery's .stop().animate()). */
+  (function() {
+      var inFlight = new WeakMap();
+      function easeInOutQuad(t) {
+          return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      }
+      window.smoothScrollTo = function(element, targetTop, duration) {
+          var prev = inFlight.get(element);
+          if (prev) cancelAnimationFrame(prev);
+          var isWindow = element === window;
+          var start = isWindow ? window.scrollY : element.scrollTop;
+          var change = targetTop - start;
+          if (change === 0 || duration <= 0) {
+              if (isWindow) window.scrollTo(0, targetTop);
+              else element.scrollTop = targetTop;
+              return;
+          }
+          var startTime = performance.now();
+          function step(now) {
+              var t = Math.min((now - startTime) / duration, 1);
+              var newTop = start + change * easeInOutQuad(t);
+              if (isWindow) window.scrollTo(0, newTop);
+              else element.scrollTop = newTop;
+              if (t < 1) inFlight.set(element, requestAnimationFrame(step));
+              else inFlight.delete(element);
+          }
+          inFlight.set(element, requestAnimationFrame(step));
+      };
+  })();
+  </script>
   <script>
-  $(function() {
-  $('body').removeClass("via");
-  setTimeout(function() {
-  $('#content').toggleClass('no');
-  }, 2200);
+  document.addEventListener('DOMContentLoaded', function() {
+      document.body.classList.remove('via');
+      setTimeout(function() {
+          document.getElementById('content').classList.toggle('no');
+      }, 2200);
   });
   </script>
   <script>
-  $(document).on('click', 'a[href^="#"]', function (event) {
+  /* Smooth-scroll for in-page anchor links. Uses getElementById rather
+     than querySelector because many anchors in this document start with
+     a digit (e.g. #1uno, #2tre) which CSS selector syntax doesn't allow
+     unescaped — jQuery handled this transparently, vanilla doesn't. */
+  document.addEventListener('click', function(event) {
+      var link = event.target.closest('a[href^="#"]');
+      if (!link) return;
+      var href = link.getAttribute('href');
+      if (!href || href.length < 2) return;
+      var target = document.getElementById(href.slice(1));
+      if (!target) return;
       event.preventDefault();
-  
-      $('html, body').animate({
-          scrollTop: $($.attr(this, 'href')).offset().top
-      },1100);});
+      var top = target.getBoundingClientRect().top + window.scrollY;
+      smoothScrollTo(window, top, 1100);
+  });
   </script>
   <script>
-  $(function() {
-  $('.btt').on('click', function(){
-      $(this).toggleClass('clicked');
-      $('.background').toggleClass('opa');
-  });
-  $('.info').on('click', function(){
-      $(this).toggleClass('clicked');
-      $('.credits').toggleClass('opa');
-      $('.npp,body').toggleClass('over');
-      $('.background').addClass('opa');
-       $('.btt').removeClass('clicked');
-  });
-  ['dolore','cred','difetto','temere','fiamma','tempo','cieco','vivere','vassene',
-   'mori','caron','amor','bruti','speranza','bordello','gloria',
-   'trombetta','fineuno','finedue','finetre',
-   'selva','paterna','digiuno',
-   'acque','braccia','disio','beatrice',
-   'pace','essilio','vergine'].forEach(function(name){
-      $('.' + name).on('click', function(){
-          setTimeout(function(){
-              $('#' + name + ' p').addClass('high');
-              $('#content').find('.high').not('#' + name + ' p').removeClass('high');
-          }, 1100);
+  document.addEventListener('DOMContentLoaded', function() {
+      var btt = document.querySelector('.btt');
+      var info = document.querySelector('.info');
+      var background = document.querySelector('.background');
+      var credits = document.querySelector('.credits');
+      var npp = document.querySelector('.npp');
+      var content = document.getElementById('content');
+
+      if (btt) {
+          btt.addEventListener('click', function() {
+              this.classList.toggle('clicked');
+              if (background) background.classList.toggle('opa');
+          });
+      }
+
+      if (info) {
+          info.addEventListener('click', function() {
+              this.classList.toggle('clicked');
+              if (credits) credits.classList.toggle('opa');
+              if (npp) npp.classList.toggle('over');
+              document.body.classList.toggle('over');
+              if (background) background.classList.add('opa');
+              if (btt) btt.classList.remove('clicked');
+          });
+      }
+
+      var verseNames = ['dolore','cred','difetto','temere','fiamma','tempo','cieco',
+          'vivere','vassene','mori','caron','amor','bruti','speranza','bordello','gloria',
+          'trombetta','fineuno','finedue','finetre','selva','paterna','digiuno',
+          'acque','braccia','disio','beatrice','pace','essilio','vergine'];
+
+      verseNames.forEach(function(name) {
+          document.querySelectorAll('.' + name).forEach(function(trigger) {
+              trigger.addEventListener('click', function() {
+                  setTimeout(function() {
+                      var wrapper = document.getElementById(name);
+                      if (!wrapper) return;
+                      var targetP = wrapper.querySelector('p');
+                      if (!targetP) return;
+                      targetP.classList.add('high');
+                      // Clear .high from every other element inside #content
+                      if (content) {
+                          content.querySelectorAll('.high').forEach(function(el) {
+                              if (el !== targetP) el.classList.remove('high');
+                          });
+                      }
+                  }, 1100);
+              });
+          });
       });
   });
-  })
   </script>
   <script>
-  $(function() {
-  $(".in a").click(function(event) {
-  event.preventDefault();
-  $(".in a.active").removeClass("active");
-  $(".in a.current").removeClass("current");
-  $(this).addClass("active");
-  $(this).find("a").addClass("current");
-  var $container = $(".npp");
-  var $scrollTo = $('.active');
-  $container.animate({scrollTop: $scrollTo.offset().top - $container.offset().top + 
-  $container.scrollTop()},1100);
-  });})
+  document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.in a').forEach(function(link) {
+          link.addEventListener('click', function(event) {
+              event.preventDefault();
+              document.querySelectorAll('.in a.active').forEach(function(el) {
+                  el.classList.remove('active');
+              });
+              document.querySelectorAll('.in a.current').forEach(function(el) {
+                  el.classList.remove('current');
+              });
+              this.classList.add('active');
+              // Preserved from original: $(this).find("a") finds nested <a>s.
+              // <a> can't legally contain <a>, so this is a no-op in practice,
+              // but kept for behavioral fidelity.
+              this.querySelectorAll('a').forEach(function(a) {
+                  a.classList.add('current');
+              });
+
+              var container = document.querySelector('.npp');
+              if (!container) return;
+              var active = document.querySelector('.active');
+              if (!active) return;
+              var targetTop = active.getBoundingClientRect().top
+                            - container.getBoundingClientRect().top
+                            + container.scrollTop;
+              smoothScrollTo(container, targetTop, 1100);
+          });
+      });
+  });
   </script>
   <script>
   /* SCROLLSPY — highlights the menu item matching the section currently in view */
-  $(function() {
-      var $menuLinks = $(".in a");
+  document.addEventListener('DOMContentLoaded', function() {
+      var menuLinks = document.querySelectorAll('.in a');
       var sections = [];
-  
+
       // Build list of menu links paired with their target sections
-      $menuLinks.each(function() {
-          var href = $(this).attr("href");
-          if (href && href.charAt(0) === "#" && href.length > 1) {
-              var $target = $(href);
-              if ($target.length) {
-                  sections.push({ link: $(this), target: $target });
+      menuLinks.forEach(function(link) {
+          var href = link.getAttribute('href');
+          if (href && href.charAt(0) === '#' && href.length > 1) {
+              // getElementById, not querySelector — many IDs start with digits.
+              var target = document.getElementById(href.slice(1));
+              if (target) {
+                  sections.push({ link: link, target: target });
               }
           }
       });
-  
+
       var isClickScrolling = false;
-  
+
       // When user clicks a menu link, suppress scrollspy briefly so the
       // smooth-scroll animation isn't fought by the spy on its way down.
-      $menuLinks.on("click", function() {
-          isClickScrolling = true;
-          setTimeout(function() { isClickScrolling = false; }, 1200);
+      menuLinks.forEach(function(link) {
+          link.addEventListener('click', function() {
+              isClickScrolling = true;
+              setTimeout(function() { isClickScrolling = false; }, 1200);
+          });
       });
-  
+
       function updateActiveMenu() {
           if (isClickScrolling) return;
-  
-          // Page scrolls via window (your click handler animates html/body),
-          // so we read window scroll — NOT #content's scroll.
-          var scrollTop = $(window).scrollTop();
-          var triggerPoint = $(window).height() / 3;
-  
+
+          var scrollTop = window.scrollY;
+          var triggerPoint = window.innerHeight / 3;
+
           var currentSection = null;
-  
+
           // Find the last section whose top is above the trigger line
           for (var i = 0; i < sections.length; i++) {
-              var offsetTop = sections[i].target.offset().top;
+              var offsetTop = sections[i].target.getBoundingClientRect().top + window.scrollY;
               if (offsetTop <= scrollTop + triggerPoint) {
                   currentSection = sections[i];
               } else {
                   break;
               }
           }
-  
-  if (currentSection && !currentSection.link.hasClass("active")) {
-      $menuLinks.removeClass("active current");
-      currentSection.link.addClass("active current");
-  
-      // Match the click behavior: scroll so the active item sits at the top,
-      // with the previous one just about to slip out of view above.
-      var $container = $(".npp");
-      var $active = currentSection.link;
-      var activeOffset = $active.offset().top - $container.offset().top + $container.scrollTop();
-  
-      $container.stop().animate({
-          scrollTop: activeOffset
-      }, 400);
-  }
+
+          if (currentSection && !currentSection.link.classList.contains('active')) {
+              menuLinks.forEach(function(link) {
+                  link.classList.remove('active', 'current');
+              });
+              currentSection.link.classList.add('active', 'current');
+
+              // Match the click behavior: scroll so the active item sits at the top,
+              // with the previous one just about to slip out of view above.
+              var container = document.querySelector('.npp');
+              if (container) {
+                  var active = currentSection.link;
+                  var activeOffset = active.getBoundingClientRect().top
+                                   - container.getBoundingClientRect().top
+                                   + container.scrollTop;
+                  // smoothScrollTo cancels any in-flight animation on the same
+                  // element, so this stays smooth even on rapid scroll.
+                  smoothScrollTo(container, activeOffset, 400);
+              }
+          }
       }
-  
+
       // Throttle scroll events via rAF for smooth performance
       var ticking = false;
-      $(window).on("scroll", function() {
+      window.addEventListener('scroll', function() {
           if (!ticking) {
               window.requestAnimationFrame(function() {
                   updateActiveMenu();
@@ -182,20 +271,22 @@
               ticking = true;
           }
       });
-  
+
       // Initial state on page load
       updateActiveMenu();
   });
   </script>
   <script>
-  $(function() {
-  const poems = document.querySelectorAll(".poema");
-  poems.forEach(poem => {
-  let n = 0;
-  poem.querySelectorAll("span.riga").forEach(sp => {
-  n += 3;
-  sp.innerHTML = n;
-  });});});
+  document.addEventListener('DOMContentLoaded', function() {
+      var poems = document.querySelectorAll('.poema');
+      poems.forEach(function(poem) {
+          var n = 0;
+          poem.querySelectorAll('span.riga').forEach(function(sp) {
+              n += 3;
+              sp.innerHTML = n;
+          });
+      });
+  });
   </script>
   <style>
   html{-webkit-tap-highlight-color:rgba(0, 0, 0, 0);-webkit-text-size-adjust:100%}
@@ -20207,7 +20298,7 @@
       var coords = estimateLatLng();
       function apply() {
           var night = isNight(computeSun(new Date(), coords.lat, coords.lng));
-          $('body').toggleClass('night', night);
+          document.body.classList.toggle('night', night);
       }
       apply();
       setInterval(apply, 60000);
@@ -20217,19 +20308,19 @@
   // Remembers the exact tercet you were reading, not just the chapter.
   // Tercets (<span class=riga>) are stable structural markers — one per 3-line
   // stanza in document order — so restoration survives layout reflow and resize.
-  $(function() {
-      const STORAGE_KEY = 'divinaCommediaLastPosition';
-      const STORAGE_VERSION = 2;
-      const tercets = document.querySelectorAll('span.riga');
+  document.addEventListener('DOMContentLoaded', function() {
+      var STORAGE_KEY = 'divinaCommediaLastPosition';
+      var STORAGE_VERSION = 2;
+      var tercets = document.querySelectorAll('span.riga');
 
       // Find the tercet currently closest to the top of the viewport,
       // i.e. the verse the reader is most likely on right now.
       function findCurrentTercetIndex() {
           if (!tercets.length) return -1;
-          const triggerY = 120;
-          let best = 0;
-          for (let i = 0; i < tercets.length; i++) {
-              const top = tercets[i].getBoundingClientRect().top;
+          var triggerY = 120;
+          var best = 0;
+          for (var i = 0; i < tercets.length; i++) {
+              var top = tercets[i].getBoundingClientRect().top;
               if (top <= triggerY) {
                   best = i;
               } else {
@@ -20240,10 +20331,11 @@
       }
 
       function saveCurrentPosition() {
-          const idx = findCurrentTercetIndex();
+          var idx = findCurrentTercetIndex();
           if (idx < 0) return;
-          const anchor = $('.in a.active').attr('href') || '';
-          const payload = {
+          var activeLink = document.querySelector('.in a.active');
+          var anchor = activeLink ? (activeLink.getAttribute('href') || '') : '';
+          var payload = {
               v: STORAGE_VERSION,
               tercetIndex: idx,
               totalTercets: tercets.length,
@@ -20255,25 +20347,29 @@
       }
 
       function restorePosition() {
-          let raw;
+          var raw;
           try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return; }
           if (!raw) return;
 
-          let data = null;
+          var data = null;
           try { data = JSON.parse(raw); } catch (e) { /* legacy format */ }
 
           // Legacy fallback: old version stored a plain anchor string like "#1cinque"
           if (!data || typeof data !== 'object') {
-              if (typeof raw === 'string' && raw.charAt(0) === '#' && $(raw).length) {
-                  setTimeout(function() {
-                      $('html, body').animate({ scrollTop: $(raw).offset().top - 100 }, 800);
-                  }, 1500);
+              if (typeof raw === 'string' && raw.charAt(0) === '#') {
+                  var legacyTarget = document.getElementById(raw.slice(1));
+                  if (legacyTarget) {
+                      setTimeout(function() {
+                          var top = legacyTarget.getBoundingClientRect().top + window.scrollY - 100;
+                          smoothScrollTo(window, top, 800);
+                      }, 1500);
+                  }
               }
               return;
           }
 
           setTimeout(function() {
-              let scrollTarget = null;
+              var scrollTarget = null;
 
               // Primary: exact tercet, provided tercet count hasn't drifted much
               if (
@@ -20282,28 +20378,35 @@
                   data.tercetIndex < tercets.length &&
                   Math.abs((data.totalTercets || tercets.length) - tercets.length) < 5
               ) {
-                  const el = tercets[data.tercetIndex];
+                  var el = tercets[data.tercetIndex];
                   scrollTarget = el.getBoundingClientRect().top + window.scrollY - 120;
-              } else if (data.anchor && $(data.anchor).length) {
+              } else if (data.anchor) {
                   // Fallback: chapter anchor
-                  scrollTarget = $(data.anchor).offset().top - 100;
+                  var anchorTarget = document.getElementById(data.anchor.slice(1));
+                  if (anchorTarget) {
+                      scrollTarget = anchorTarget.getBoundingClientRect().top + window.scrollY - 100;
+                  }
               }
 
               if (scrollTarget !== null) {
-                  $('html, body').animate({ scrollTop: scrollTarget }, 800);
+                  smoothScrollTo(window, scrollTarget, 800);
               }
 
               // Sync the menu highlight to the restored chapter
               if (data.anchor) {
-                  $('.in a').removeClass('active current');
-                  $('.in a[href="' + data.anchor + '"]').addClass('active current');
+                  document.querySelectorAll('.in a').forEach(function(a) {
+                      a.classList.remove('active', 'current');
+                  });
+                  // Anchor values here are simple "#word123" — safe in attribute selectors.
+                  var match = document.querySelector('.in a[href="' + data.anchor + '"]');
+                  if (match) match.classList.add('active', 'current');
               }
           }, 1500);
       }
 
       // Auto-save on scroll, throttled via requestAnimationFrame
-      let ticking = false;
-      $(window).on('scroll', function() {
+      var ticking = false;
+      window.addEventListener('scroll', function() {
           if (!ticking) {
               window.requestAnimationFrame(function() {
                   saveCurrentPosition();
@@ -20314,7 +20417,9 @@
       });
 
       // Save shortly after a menu click (lets the smooth-scroll settle first)
-      $(document).on('click', 'a[href^="#"]', function() {
+      document.addEventListener('click', function(event) {
+          var link = event.target.closest('a[href^="#"]');
+          if (!link) return;
           setTimeout(saveCurrentPosition, 1200);
       });
 

@@ -25,7 +25,12 @@ A single-page reader for the complete text of Dante's *Divine Comedy* (Inferno, 
 
 ## Stack
 
-Plain HTML/CSS/JS with jQuery 3.4.1. If I were rebuilding today I'd drop jQuery — most of what it does here (DOM queries, smooth scroll, event delegation) is a one-liner in modern vanilla JS.
+Plain HTML, CSS, and vanilla JavaScript. No frameworks, no build step, no dependencies — drop it on any static host or open it in a browser.
+
+Originally written with jQuery 3.4.1 and later refactored to vanilla JS. A few small bits worth noting from that refactor:
+
+- **Smooth scroll** uses a custom `smoothScrollTo` helper (rAF + easeInOutQuad) instead of `window.scrollTo({behavior: 'smooth'})` so the 1100ms timing of the original is preserved exactly. The helper cancels any in-flight animation on the same element, mirroring jQuery's `.stop().animate()` chain that the scrollspy relied on.
+- **Anchor targets** use `getElementById` rather than `querySelector` because many IDs in the document start with a digit (`#1uno`, `#2tre`), which CSS selector syntax doesn't allow unescaped. jQuery papered over this; vanilla doesn't.
 
 ## Running locally
 
