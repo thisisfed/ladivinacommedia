@@ -357,8 +357,18 @@
   });
   </script>
   <style>
-  html{-webkit-tap-highlight-color:rgba(0, 0, 0, 0);-webkit-text-size-adjust:100%}
-  body{transition:color .4s ease-in-out, background .4s ease-in-out, opacity .4s ease-in-out;letter-spacing:.01em;border:0;color:#212529;background:#fff;margin:0;padding:0;width:100%;height:100%}
+  html{
+    -webkit-tap-highlight-color:rgba(0, 0, 0, 0);
+    -webkit-text-size-adjust:100%;
+    /* Explicitly allow native pull-to-refresh on iOS Safari. The
+       combination of position:fixed elements with backdrop-filter at
+       top:0 (search bar) and a fixed overlay (.background) can cause
+       iOS to treat the document as having custom overscroll handling
+       and block the gesture. overscroll-behavior-y:auto re-opts in. */
+    overscroll-behavior-y:auto;
+  }
+  body{overscroll-behavior-y:auto}
+  body{transition:color .4s ease-in-out, background .4s ease-in-out, opacity .4s ease-in-out;letter-spacing:.01em;border:0;color:#212529;background:#fff;margin:0;padding:0;width:100%;min-height:100%}
   body,.titolo{font:3vw/1.3em Helvetica,sans-serif;text-align:center}
   body > iframe:first-child {display: none !important}
   h1,h2,h3{font-family:Helvetica;font-size:inherit;font-weight:inherit;display:inline;text-align:center}
@@ -388,6 +398,12 @@
      padding-top is also zeroed (was 20px) so it doesn't add to the
      1.3em margin and push the title below the icons. */
   #content{margin:1.3em 10vw 0 10vw;padding:0 0 calc(100vh - 2.6em) 0;transition:transform .2s ease-in-out}
+  /* h1 carries a default browser margin (~0.67em top+bottom) which
+     pushed "LA DIVINA COMMEDIA" below where the C (left menu) and 1
+     (right menu) sit. Both menu items have padding-top:1.3em from
+     viewport top — matching #content's margin-top:1.3em — so zeroing
+     h1's own margin makes its top edge land exactly there too. */
+  #content h1{margin:0}
   #main{text-align:left}
   .poema{margin-bottom:2.6em}
   /* LAZY RENDERING
@@ -519,18 +535,18 @@
   a{color:inherit;text-decoration:none;border-bottom:.05em solid;}
   a:hover{border:none}
   .inf,.pur,.par,.sans{font-family:Helvetica}
-  .inf,.infe,.inferno h3 {color:rgb(255,99,71)}
-  .pur,.purg,.purgatorio h3{color:rgb(0,255,155)}
-  .par,.para,.paradiso h3{color:rgb(0,155,255)}
+  .inf,.infe,.inferno h3 {color:#ff5722}
+  .pur,.purg,.purgatorio h3{color:#00c853}
+  .par,.para,.paradiso h3{color:#2979ff}
   /* TENTATIVE: underline instead of background highlight for famous
      verses. text-decoration handles per-line treatment automatically —
      each line inside the .high <p> gets its own underline rather than
      one continuous bottom border under the whole block. .1em thickness
      scales with the body font so it reads consistently across
      breakpoints. */
-  .inferno .high{text-decoration:underline rgb(255,99,71) .1em;text-underline-offset:.15em}
-  .purgatorio .high{text-decoration:underline rgb(0,255,155) .1em;text-underline-offset:.15em}
-  .paradiso .high{text-decoration:underline rgb(0,155,255) .1em;text-underline-offset:.15em}
+  .inferno .high{text-decoration:underline #ff5722 .1em;text-underline-offset:.15em}
+  .purgatorio .high{text-decoration:underline #00c853 .1em;text-underline-offset:.15em}
+  .paradiso .high{text-decoration:underline #2979ff .1em;text-underline-offset:.15em}
   .via{opacity:0;transition:opacity .2s ease-in-out;}
   .info,.btt{cursor:pointer}
   .info:after{content:"i"}
@@ -580,7 +596,7 @@
     color:#000;
   }
   .night .srch{color:#fff}
-  .srch:after{content:"S"}
+  .srch:after{content:"C"}
   .srch.open:after{content:"×"}
 
   /* === Apple-style glass search bar ===
@@ -712,14 +728,16 @@
     font:inherit;
     color:#000;
     line-height:1;
-    /* Tighter horizontal padding (was .4em) so the two arrows sit
-       closer together inside their flex group — just a space between. */
-    padding:.2em .15em;
+    /* No horizontal padding — the flex `gap:.4em` on .search-arrows
+       provides the spacing. Adding side padding here would compound
+       with the gap, making the Su↔Giù gap look bigger than the
+       (count)↔Su gap (which only has the bar's flex gap, no padding). */
+    padding:.2em 0;
     flex-shrink:0;
     user-select:none;
   }
-  .search-prev:after{content:"Up"}
-  .search-next:after{content:"Down"}
+  .search-prev:after{content:"Su"}
+  .search-next:after{content:"Giù"}
   /* Hidden via display:none rather than just dimmed, so before the
      user has typed anything (or when there are zero matches) the bar
      is just an input field — Up/Down only appear once they're
@@ -738,12 +756,12 @@
     text-underline-offset:.15em;
     transition:text-decoration-color .15s ease-in-out;
   }
-  .inferno mark.search-hit{text-decoration-color:rgba(255,99,71,.55)}
-  .purgatorio mark.search-hit{text-decoration-color:rgba(0,255,155,.55)}
-  .paradiso mark.search-hit{text-decoration-color:rgba(0,155,255,.55)}
-  .inferno mark.search-hit.current{text-decoration-color:rgb(255,99,71)}
-  .purgatorio mark.search-hit.current{text-decoration-color:rgb(0,255,155)}
-  .paradiso mark.search-hit.current{text-decoration-color:rgb(0,155,255)}
+  .inferno mark.search-hit{text-decoration-color:rgba(255,87,34,.55)}
+  .purgatorio mark.search-hit{text-decoration-color:rgba(0,200,83,.55)}
+  .paradiso mark.search-hit{text-decoration-color:rgba(41,121,255,.55)}
+  .inferno mark.search-hit.current{text-decoration-color:#ff5722}
+  .purgatorio mark.search-hit.current{text-decoration-color:#00c853}
+  .paradiso mark.search-hit.current{text-decoration-color:#2979ff}
 
   /* === FOCUS MODE ===
      Clicking the – button toggles body.focus, which fades the side
@@ -801,7 +819,25 @@
   @media screen and (max-width:700px){
   body,.titolo{font:16px/1.4em Helvetica,serif}
   .poema{margin-bottom:2.8em;contain-intrinsic-size:auto 2200px}
-  .riga{display:none}}
+  .riga{display:none}
+  /* iOS Safari pull-to-refresh fix: if .npp (the right menu with
+     overflow-y:auto) starts at top:0, iOS routes finger-drags from
+     the right side of the screen into the menu's scroll container
+     instead of the document's. PTR then never fires. Pushing the
+     menu down ~44px (the height of one safe-area-equivalent gesture
+     zone) leaves a strip at the top where PTR can land properly,
+     even if the user starts their drag on the right side of the
+     screen where the menu lives. */
+  .npp{top:44px;height:calc(100% - 44px)}
+  /* Same logic for .menu-head on the left, even though it's not
+     scrollable — for visual symmetry and to be safe about any
+     gesture-targeting heuristics on the left column. */
+  .menu-head{top:44px}
+  /* And push the title down by the same 44px so the C / "LA DIVINA
+     COMMEDIA" / 1 alignment is preserved on mobile too. The base
+     1.3em margin-top stays; we add 44px to compensate for the
+     menus' top:44px offset. */
+  #content{margin-top:calc(1.3em + 44px)}}
   </style>
   </head>
   <body class=via>
@@ -811,7 +847,7 @@
     <div title="Info" class="info"></div>
   </div>
   <div class="search-bar" role="search">
-    <input type="text" class="search-input" placeholder="Cerca…" aria-label="Cerca nel testo">
+    <input type="text" inputmode="none" class="search-input" placeholder="Cerca…" aria-label="Cerca nel testo">
     <span class="search-count" aria-live="polite"></span>
     <div class="search-arrows">
       <div class="search-prev" role="button" tabindex="0" aria-label="Risultato precedente"></div>
@@ -20857,22 +20893,72 @@
           return best;
       }
 
+      // .riga is display:none at ≤700px (mobile). Hidden elements return
+      // top:0 from getBoundingClientRect(), which makes every tercet
+      // appear to be "above the trigger line" and the anchor math
+      // points at the LAST tercet in the document — pinning that to
+      // the top on resize snaps the page to the bottom. Detect the
+      // hidden state and skip the pin entirely at that breakpoint.
+      function tercetsAreVisible() {
+          if (!tercets.length) return false;
+          // offsetParent is null when display:none. Cheaper than
+          // getComputedStyle and works for the whole class at once.
+          return tercets[0].offsetParent !== null;
+      }
+
       function pinAnchorToTop() {
+          if (!tercetsAreVisible()) return;
           var el = tercets[anchorIndex];
           if (!el) return;
+
+          // The anchor tercet may sit inside a content-visibility:auto
+          // canto whose contents are currently skipped, OR be below
+          // cantos that haven't yet rendered with their real heights
+          // (placeholders are 5500px each — vs real cantos which vary
+          // widely). Either case gives a wrong getBoundingClientRect.
+          //
+          // Force-render every canto from the start of the document up
+          // to and including the anchor's canto, then sync layout. After
+          // this, the anchor's position is measured against accurate
+          // geometry, not placeholder estimates.
+          var anchorCanto = el.closest('.poema');
+          if (anchorCanto) {
+              var cantos = document.querySelectorAll('.poema');
+              for (var i = 0; i < cantos.length; i++) {
+                  if (cantos[i].style.contentVisibility !== 'visible') {
+                      cantos[i].style.contentVisibility = 'visible';
+                  }
+                  if (cantos[i] === anchorCanto) break;
+              }
+              void document.body.offsetHeight;  // force sync layout
+          }
+
           var top = el.getBoundingClientRect().top + window.scrollY - TRIGGER_Y;
-          // Synchronous scroll — never smooth here. Animation would compound
-          // with rapid-fire resize events into exactly the jitter we're
-          // suppressing.
+
+          // Sanity check: if the pin target is outside the document,
+          // something has gone wrong (anchor invalidated by extreme
+          // resize, or measured against still-stale layout). Bail out
+          // and leave the browser's native scroll position alone.
+          var maxScroll = Math.max(0,
+              document.documentElement.scrollHeight - window.innerHeight);
+          if (top < 0 || top > maxScroll) return;
+
+          // Synchronous scroll — never smooth. Animation would compound
+          // with rapid-fire resize events.
           window.scrollTo(0, top);
       }
 
       // Continuously track the anchor during normal scrolling. Suppressed
       // while resizing because the values would already reflect post-reflow
       // positions and overwrite the pre-resize anchor we need to preserve.
+      // Also skipped when tercets are hidden (mobile breakpoint) because
+      // getBoundingClientRect on display:none returns 0,0 — which would
+      // poison anchorIndex with the last-tercet-index and cause the next
+      // resize event to fling the page to the bottom.
       var ticking = false;
       window.addEventListener('scroll', function() {
           if (isResizing) return;
+          if (!tercetsAreVisible()) return;
           if (!ticking) {
               window.requestAnimationFrame(function() {
                   anchorIndex = getTopTercetIndex();
@@ -20890,26 +20976,42 @@
       // of fighting the user during a resize burst.
       window.__isResizing = false;
 
+      // Track the viewport size at the START of a resize burst, so we
+      // can compare to the END and bail out if the change was huge.
+      var resizeStartW = window.innerWidth;
+      var resizeStartH = window.innerHeight;
+
       window.addEventListener('resize', function() {
           if (!isResizing) {
-              // First event of this burst — anchorIndex still holds the
-              // pre-resize value because the scroll listener above stops
-              // updating it from this point on.
+              // First event of this burst — capture starting dimensions.
+              // anchorIndex still holds the pre-resize value because the
+              // scroll listener stops updating it from this point on.
               isResizing = true;
               window.__isResizing = true;
+              resizeStartW = window.innerWidth;
+              resizeStartH = window.innerHeight;
           }
-          // Re-pin on every resize event so the line stays glued mid-drag,
-          // not just after the user releases the window edge.
-          pinAnchorToTop();
-
-          // Debounce the "resize finished" signal. 180ms is long enough to
-          // absorb the last few stragglers from a drag, short enough that
-          // normal scrolling resumes feeling instant.
+          // DON'T re-pin on every resize event. The previous version did,
+          // which fired dozens of times during a drag — each one
+          // correcting against possibly-stale measurements and causing
+          // visible jumping up and down. Just debounce to the end:
           clearTimeout(resizeEndTimer);
           resizeEndTimer = setTimeout(function() {
-              // One final correction in case the last resize event arrived
-              // mid-rAF and the layout was still settling when we pinned.
-              pinAnchorToTop();
+              // Bail out if the viewport changed by more than half in
+              // either dimension — that's a tiny→fullscreen jump or
+              // similar, where the anchor we captured is unreliable
+              // (the page layout has reconfigured beyond what tercet-
+              // pinning can correct for). Better to leave the browser's
+              // native scroll position alone than land confidently in
+              // the wrong place — like the end of the Commedia.
+              var wRatio = window.innerWidth / resizeStartW;
+              var hRatio = window.innerHeight / resizeStartH;
+              var hugeChange =
+                  wRatio < 0.5 || wRatio > 2 ||
+                  hRatio < 0.5 || hRatio > 2;
+              if (!hugeChange) {
+                  pinAnchorToTop();
+              }
               isResizing = false;
               window.__isResizing = false;
           }, 180);
