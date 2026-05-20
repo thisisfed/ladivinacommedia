@@ -618,14 +618,9 @@
        (1.3em - .5em) puts the input text at exactly 1.3em from
        the viewport top, level with the S/× baseline. */
     top:calc(1.3em - .5em + env(safe-area-inset-top, 0px));
-    /* Bar left edge at 10vw — same horizontal position as the right
-       edge of the left menu column (which holds the S/× toggle at
-       width:10vw centred). The input itself, after the bar's .8em
-       left padding, sits vertically under the S so clicking the
-       toggle and clicking into the input feel anchored to the same
-       column. Right edge at 15vw gives 75vw bar width. */
-    left:10vw;
-    right:15vw;
+    /* Bar at 75vw, symmetric 12.5vw margins — centred on viewport. */
+    left:12.5vw;
+    right:12.5vw;
     /* z-index must clear .background (999999999). */
     z-index:1000000001;
     /* Smooth fade-in matching the focus gradient and credits panel
@@ -657,21 +652,26 @@
        of any ancestor, which also stabilises the backdrop on iOS. */
     isolation:isolate;
 
-    /* More solid background (was 0.5) so the bar visually pops out
-       from the page rather than fading into it. The blur still does
-       its glass thing behind, but the surface itself is more present. */
-    background:rgba(255,255,255,0.78);
-    -webkit-backdrop-filter:saturate(200%) blur(50px);
-    backdrop-filter:saturate(200%) blur(50px);
+    /* Glass surface: low background opacity so the backdrop-filter
+       blur reads as proper frosted glass. The blurred verse text
+       behind should be visible as a soft colour wash through the
+       surface. */
+    background:rgba(255,255,255,0.4);
+    -webkit-backdrop-filter:saturate(220%) blur(60px);
+    backdrop-filter:saturate(220%) blur(60px);
 
-    /* Stronger shadow (was 0.06/0.16 alpha at 8/28px) — denser and
-       deeper, so the bar reads as floating noticeably above the page. */
+    /* Layered shadow — pushed harder for a more prominent glass read:
+       1. inset top — bright highlight on the upper rim (light catching the glass)
+       2. inset bottom — subtle dark on the lower rim, suggests glass thickness
+       3. hairline outline — bright outer trace defining the edge
+       4. tight contact shadow — short, dark, immediately below
+       5. soft ambient — long diffuse shadow, floats noticeably above */
     box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.8),
-      inset 0 -1px 0 rgba(0,0,0,0.04),
-      0 0 0 0.5px rgba(255,255,255,0.5),
-      0 12px 24px rgba(0,0,0,0.10),
-      0 36px 72px -10px rgba(0,0,0,0.24);
+      inset 0 1.5px 0 rgba(255,255,255,0.95),
+      inset 0 -1px 0 rgba(0,0,0,0.06),
+      0 0 0 0.5px rgba(255,255,255,0.7),
+      0 10px 20px rgba(0,0,0,0.10),
+      0 32px 64px -8px rgba(0,0,0,0.22);
   }
   .search-bar.open{
     visibility:visible;
@@ -681,6 +681,14 @@
        immediately, opacity then animates from 0 to 1. */
     transition:opacity .4s cubic-bezier(0.4, 0, 0.2, 1),
                visibility 0s linear 0s;
+  }
+  /* In night mode the page background is dark (#212529), so the
+     backdrop-filter blurs that dark colour and the 0.4-opacity white
+     surface ends up tinted grey. Raise opacity to keep the bar
+     visually identical to day mode — white glass with crisp black
+     text regardless of theme. */
+  .night .search-bar{
+    background:rgba(255,255,255,0.92);
   }
 
   .search-input{
@@ -819,25 +827,7 @@
   @media screen and (max-width:700px){
   body,.titolo{font:16px/1.4em Helvetica,serif}
   .poema{margin-bottom:2.8em;contain-intrinsic-size:auto 2200px}
-  .riga{display:none}
-  /* iOS Safari pull-to-refresh fix: if .npp (the right menu with
-     overflow-y:auto) starts at top:0, iOS routes finger-drags from
-     the right side of the screen into the menu's scroll container
-     instead of the document's. PTR then never fires. Pushing the
-     menu down ~44px (the height of one safe-area-equivalent gesture
-     zone) leaves a strip at the top where PTR can land properly,
-     even if the user starts their drag on the right side of the
-     screen where the menu lives. */
-  .npp{top:44px;height:calc(100% - 44px)}
-  /* Same logic for .menu-head on the left, even though it's not
-     scrollable — for visual symmetry and to be safe about any
-     gesture-targeting heuristics on the left column. */
-  .menu-head{top:44px}
-  /* And push the title down by the same 44px so the C / "LA DIVINA
-     COMMEDIA" / 1 alignment is preserved on mobile too. The base
-     1.3em margin-top stays; we add 44px to compensate for the
-     menus' top:44px offset. */
-  #content{margin-top:calc(1.3em + 44px)}}
+  .riga{display:none}}
   </style>
   </head>
   <body class=via>
