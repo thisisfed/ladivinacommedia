@@ -363,7 +363,7 @@
   body > iframe:first-child {display: none !important}
   h1,h2,h3{font-family:Helvetica;font-size:inherit;font-weight:inherit;display:inline;text-align:center}
   p{margin:0;padding:0;display:inline;}
-  .high{transition:background .2s ease-in-out, color .2s ease-in-out}
+  .high{transition:text-decoration-color .2s ease-in-out, color .2s ease-in-out}
   .in a:hover{opacity:.3;color:#212529!important}
   .in a{transition:opacity .1s ease-in-out,color .1s ease-in-out}
   /* INDEX */
@@ -522,9 +522,15 @@
   .inf,.infe,.inferno h3 {color:rgb(255,99,71)}
   .pur,.purg,.purgatorio h3{color:rgb(0,255,155)}
   .par,.para,.paradiso h3{color:rgb(0,155,255)}
-  .inferno .high{background:rgb(255,99,71)}
-  .purgatorio .high{background:rgb(0,255,155)}
-  .paradiso .high{background:rgb(0,155,255)}
+  /* TENTATIVE: underline instead of background highlight for famous
+     verses. text-decoration handles per-line treatment automatically —
+     each line inside the .high <p> gets its own underline rather than
+     one continuous bottom border under the whole block. .1em thickness
+     scales with the body font so it reads consistently across
+     breakpoints. */
+  .inferno .high{text-decoration:underline rgb(255,99,71) .1em;text-underline-offset:.15em}
+  .purgatorio .high{text-decoration:underline rgb(0,255,155) .1em;text-underline-offset:.15em}
+  .paradiso .high{text-decoration:underline rgb(0,155,255) .1em;text-underline-offset:.15em}
   .via{opacity:0;transition:opacity .2s ease-in-out;}
   .info,.btt{cursor:pointer}
   .info:after{content:"i"}
@@ -720,18 +726,24 @@
      actually useful. */
   .search-prev.disabled,.search-next.disabled{display:none}
 
-  /* Match highlights — same RGB values as .high (per-cantica verse colour).
-     padding:0 keeps the highlighted span the EXACT width of the underlying
-     letters; previously the 0.05em horizontal padding nudged surrounding
-     letters slightly outward and made the letter-spacing look off around
-     wrapped words. */
-  mark.search-hit{color:inherit;padding:0;border-radius:.15em;transition:background .15s ease-in-out}
-  .inferno mark.search-hit{background:rgba(255,99,71,.4)}
-  .purgatorio mark.search-hit{background:rgba(0,255,155,.4)}
-  .paradiso mark.search-hit{background:rgba(0,155,255,.4)}
-  .inferno mark.search-hit.current{background:rgb(255,99,71)}
-  .purgatorio mark.search-hit.current{background:rgb(0,255,155)}
-  .paradiso mark.search-hit.current{background:rgb(0,155,255)}
+  /* Match highlights — TENTATIVE: per-line underline via text-decoration
+     instead of background colour. Same cantica colours as .high above.
+     Inactive matches use lower-saturation colour; the current one uses
+     the full cantica colour. .1em thickness mirrors .high. */
+  mark.search-hit{
+    color:inherit;
+    background:transparent;
+    padding:0;
+    text-decoration:underline currentColor .1em;
+    text-underline-offset:.15em;
+    transition:text-decoration-color .15s ease-in-out;
+  }
+  .inferno mark.search-hit{text-decoration-color:rgba(255,99,71,.55)}
+  .purgatorio mark.search-hit{text-decoration-color:rgba(0,255,155,.55)}
+  .paradiso mark.search-hit{text-decoration-color:rgba(0,155,255,.55)}
+  .inferno mark.search-hit.current{text-decoration-color:rgb(255,99,71)}
+  .purgatorio mark.search-hit.current{text-decoration-color:rgb(0,255,155)}
+  .paradiso mark.search-hit.current{text-decoration-color:rgb(0,155,255)}
 
   /* === FOCUS MODE ===
      Clicking the – button toggles body.focus, which fades the side
