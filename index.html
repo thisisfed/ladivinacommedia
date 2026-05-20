@@ -81,6 +81,25 @@
           }
           inFlight.set(element, requestAnimationFrame(step));
       };
+
+      /* Ensure an element inside a content-visibility:auto canto is laid
+         out before we measure its position. While a canto is "skipped" by
+         content-visibility, getBoundingClientRect() on its descendants
+         returns the placeholder's top — not the descendant's real
+         position — so any code that wants to scroll to a quote or restore
+         a reading position must call this first. Returns the canto that
+         was force-rendered so the caller can restore the lazy behaviour
+         later, or null if no action was needed. */
+      window.ensureRendered = function(el) {
+          if (!el || !el.closest) return null;
+          var canto = el.closest('.poema');
+          if (!canto || canto.style.contentVisibility === 'visible') return null;
+          canto.style.contentVisibility = 'visible';
+          // Reading offsetHeight forces synchronous layout, so subsequent
+          // getBoundingClientRect calls on descendants are accurate.
+          void canto.offsetHeight;
+          return canto;
+      };
   })();
   </script>
   <script>
@@ -104,6 +123,42 @@
       var target = document.getElementById(href.slice(1));
       if (!target) return;
       event.preventDefault();
+
+      // === LAYOUT-STABLE PRE-RENDER ===
+      // With content-visibility:auto, cantos that haven't entered the
+      // viewport yet use an intrinsic-size guess (5500px). Real cantos
+      // vary considerably — some 3000px, some 7000px — so the
+      // placeholder-summed height drifts from actual document height
+      // by potentially hundreds or thousands of pixels for deep links.
+      //
+      // Without pre-rendering, target.top is measured against those
+      // placeholder estimates. The smooth scroll commits to that Y.
+      // During the 1100ms animation, intermediate cantos render as they
+      // enter the viewport, replacing their 5500px guess with actual
+      // heights, the document shifts, and the target ends up off-screen.
+      //
+      // Pre-rendering every canto from the start of the document up to
+      // and including the target's canto guarantees the layout is
+      // stable before we measure, so the smooth scroll lands exactly
+      // on the anchor. Same approach used by the search-arrow nav.
+      var targetCanto = target.closest('.poema');
+      if (targetCanto) {
+          var cantos = document.querySelectorAll('.poema');
+          for (var i = 0; i < cantos.length; i++) {
+              if (cantos[i].style.contentVisibility !== 'visible') {
+                  cantos[i].style.contentVisibility = 'visible';
+              }
+              if (cantos[i] === targetCanto) break;
+          }
+          // Force synchronous layout so the next getBoundingClientRect
+          // reflects the post-render geometry.
+          void document.body.offsetHeight;
+      } else if (window.ensureRendered) {
+          // Target isn't inside a .poema (e.g. credits anchor) — fall
+          // back to single-element render.
+          window.ensureRendered(target);
+      }
+
       var top = target.getBoundingClientRect().top + window.scrollY;
       smoothScrollTo(window, top, 1100);
   });
@@ -121,6 +176,9 @@
           btt.addEventListener('click', function() {
               this.classList.toggle('clicked');
               if (background) background.classList.toggle('opa');
+              // body.focus drives the CSS that dims/desaturates everything
+              // unnecessary to reading — see .focus rules in CSS.
+              document.body.classList.toggle('focus');
           });
       }
 
@@ -132,6 +190,8 @@
               document.body.classList.toggle('over');
               if (background) background.classList.add('opa');
               if (btt) btt.classList.remove('clicked');
+              // Opening info closes focus mode along with btt's clicked state.
+              document.body.classList.remove('focus');
           });
       }
 
@@ -223,6 +283,12 @@
 
       function updateActiveMenu() {
           if (isClickScrolling) return;
+          // During a resize burst, the resize stabilizer is repositioning the
+          // viewport every event. Letting the scrollspy chase those transient
+          // positions and animate the side menu in response is exactly the
+          // jitter we're trying to suppress — skip and let it resync naturally
+          // on the next real scroll.
+          if (window.__isResizing) return;
 
           var scrollTop = window.scrollY;
           var triggerPoint = window.innerHeight / 3;
@@ -245,8 +311,10 @@
               });
               currentSection.link.classList.add('active', 'current');
 
-              // Match the click behavior: scroll so the active item sits at the top,
-              // with the previous one just about to slip out of view above.
+              // Scroll so the active item sits at the top of the menu's
+              // scroll area (the sticky .menu-head will overlay the
+              // top edge, but the user said that alignment-below-header
+              // approach felt weird — natural top-alignment is back).
               var container = document.querySelector('.npp');
               if (container) {
                   var active = currentSection.link;
@@ -300,7 +368,7 @@
   .in a{transition:opacity .1s ease-in-out,color .1s ease-in-out}
   /* INDEX */
   .titolo{text-align:center;cursor:pointer;}
-  .npp{text-align:center;position:fixed;padding:20px 0 calc(100vh - 2.6em) 0;right:0;top:0;height:100%;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;transition:opacity .2s ease-in-out;z-index:10000000;scrollbar-width:none;-ms-overflow-style:none}
+  .npp{text-align:center;position:fixed;padding:0 0 calc(100vh - 2.6em) 0;right:0;top:0;height:100%;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;transition:opacity .2s ease-in-out;z-index:10000000;scrollbar-width:none;-ms-overflow-style:none}
   /* Hide the menu's scrollbar so it doesn't visually compete with the
      document scrollbar on the right edge. The menu can still scroll
      via mouse wheel, touch, and the scrollspy's programmatic scroll. */
@@ -308,10 +376,33 @@
   .in a{display:block;border:none}
   .index{position:fixed;padding:20px 20px 20px 0;left:0;top:0;width:calc(15vw - 20px);height:100%;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;transition:opacity .2s ease-in-out;z-index:10000000;}
   .index div{cursor:pointer}
-  /* CONTENT */
-  #content{margin:calc(50vh - 2em - 20px) 15vw 0 15vw;padding:20px 0 calc(100vh - 2.6em) 0;transition:transform .2s ease-in-out}
+  /* CONTENT
+     margin-top:1.3em aligns the top of the title block with the
+     vertical baseline of the menu icons (S/×/–/i on the left,
+     canto numbers on the right) — they all use padding-top:1.3em
+     from the viewport top, so the title's first line ("LA DIVINA
+     COMMEDIA") sits level with S and 1 on first paint. The
+     previous calc(50vh - …) vertical-centred the title on opening,
+     which left a tall blank gap at the top that the user found
+     out of place.
+     padding-top is also zeroed (was 20px) so it doesn't add to the
+     1.3em margin and push the title below the icons. */
+  #content{margin:1.3em 10vw 0 10vw;padding:0 0 calc(100vh - 2.6em) 0;transition:transform .2s ease-in-out}
   #main{text-align:left}
   .poema{margin-bottom:2.6em}
+  /* LAZY RENDERING
+     Skip layout and paint for off-screen cantos. The browser reserves a
+     placeholder of approximately each canto's height instead, then renders
+     the real contents only when the canto enters (or nears) the viewport.
+     This is what makes resize cheap: the browser reflows the canto(s) the
+     user is actually reading, not all 100 at once.
+
+     'auto' before the length tells the browser to remember each canto's
+     real rendered size after first measurement; the explicit length is the
+     fallback used for cantos not yet seen on this page load. Values are
+     tuned per breakpoint to roughly match the fluid typography (3vw on
+     desktop → ~6000px per canto; 30px font → ~3500px; 16px mobile → ~2200px). */
+  .poema{content-visibility:auto;contain-intrinsic-size:auto 5500px}
   .intro {position: absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
   /* BACKGROUND */
   /* FOCUS MODE — Clean professional vignette (top + bottom only) */
@@ -328,7 +419,13 @@
       opacity: 1;
   }
   
-  /* Top soft fade */
+  /* Top soft fade.
+     S-curve fall-off: 100% opaque at the very edge → 50% at the
+     midpoint → 0% at the inner edge. Five stops gives a smoother
+     visual transition than the previous two-stop curve, which had
+     a hard plateau through most of its height and only really
+     faded right at the end. Particularly visible in night mode,
+     where the dark gradient over dark text is less forgiving. */
   .background::before {
       content: '';
       position: absolute;
@@ -338,14 +435,16 @@
       height: 40%;
       background: linear-gradient(
           to bottom,
-          rgba(255,255,255,0.97) 0%,
-          rgba(255,255,255,0.15) 55%,
-          transparent 100%
+          rgba(255,255,255,1) 0%,
+          rgba(255,255,255,0.85) 25%,
+          rgba(255,255,255,0.5) 55%,
+          rgba(255,255,255,0.15) 80%,
+          rgba(255,255,255,0) 100%
       );
       z-index: 1;
   }
   
-  /* Bottom soft fade */
+  /* Bottom soft fade — mirror of the top. */
   .background::after {
       content: '';
       position: absolute;
@@ -355,28 +454,37 @@
       height: 40%;
       background: linear-gradient(
           to top,
-          rgba(255,255,255,0.97) 0%,
-          rgba(255,255,255,0.15) 55%,
-          transparent 100%
+          rgba(255,255,255,1) 0%,
+          rgba(255,255,255,0.85) 25%,
+          rgba(255,255,255,0.5) 55%,
+          rgba(255,255,255,0.15) 80%,
+          rgba(255,255,255,0) 100%
       );
       z-index: 1;
   }
   
-  /* Night mode support */
+  /* Night mode — same S-curve but with the page's dark background
+     colour. Important to start at 100% (not 0.97 as before) because
+     a near-opaque dark band at the top of a dark page reads as a
+     flat stripe rather than a fade. */
   .night .background::before {
       background: linear-gradient(
           to bottom,
-          rgba(33,37,41,0.97) 0%,
-          rgba(33,37,41,0.15) 55%,
-          transparent 100%
+          rgba(33,37,41,1) 0%,
+          rgba(33,37,41,0.85) 25%,
+          rgba(33,37,41,0.5) 55%,
+          rgba(33,37,41,0.15) 80%,
+          rgba(33,37,41,0) 100%
       );
   }
   .night .background::after {
       background: linear-gradient(
           to top,
-          rgba(33,37,41,0.97) 0%,
-          rgba(33,37,41,0.15) 55%,
-          transparent 100%
+          rgba(33,37,41,1) 0%,
+          rgba(33,37,41,0.85) 25%,
+          rgba(33,37,41,0.5) 55%,
+          rgba(33,37,41,0.15) 80%,
+          rgba(33,37,41,0) 100%
       );
   }
   
@@ -387,10 +495,17 @@
   /* CREDITS */
   .credits{transition:opacity.2s ease-in-out;padding:10px;display:table;
   position:fixed;top:0;left:0;width:100%;height:100%;background-color:rgba(255,255,255,1);z-index:10000;box-sizing:border-box}
-  .inner{opacity:.3;vertical-align:bottom;display:table-cell;padding-right:15vw;}
+  .inner{vertical-align:bottom;display:table-cell;}
+  /* Inside .credits the courier should be full-opacity (black on white
+     in day, white on dark in night via the .night .credits rule below
+     that sets color:#fff). Without this override it would inherit
+     .courier's 0.3 opacity dim, which is appropriate for the per-canto
+     editorial intros but wrong for the credits panel where the text
+     IS the panel's content rather than commentary on it. */
+  .credits .courier{opacity:1}
   .courier,.inner{font-family:Helvetica}
   .trans{opacity:.1!important}
-  .npp{width:15vw}
+  .npp{width:10vw}
   .emo{word-spacing:21vw}
   .title{margin:0 0 20px 0}
   .canto{display: block;}
@@ -398,7 +513,7 @@
   .opa{opacity:0!important;user-select:none;pointer-events:none;}
   .center,.canto{text-align:center}
   .riga{float:right;font-family:Helvetica;opacity:.3;user-select:none}
-  .courier{padding:0 2.5em;text-align:justify;opacity:.3;}
+  .courier{width:80%;margin:0 auto;padding:0;text-align:justify;opacity:.3}
   .border{border-bottom:1px solid}
   .over{overflow:hidden}
   a{color:inherit;text-decoration:none;border-bottom:.05em solid;}
@@ -421,6 +536,239 @@
   .active{color:#212529}
   .top:after{content:""!important}
   #fineuno,#finedue,#finetre,#amor,#caron,#bruti,#speranza,#bordello,#gloria,#trombetta,#mori,#vassene,#fiamma,#tempo,#cieco,#vivere,#temere,#difetto,#cred,#dolore,#selva,#paterna,#digiuno,#acque,#braccia,#disio,#beatrice,#pace,#essilio,#vergine{padding-top:1.3em;margin-top:-1.3em;}
+  /* SEARCH WIDGET
+     The S lives inside .in (the menu list) so it shares the menu's
+     column width and centring rules — that's what keeps it aligned
+     with the menu icons below across every breakpoint. Position
+     sticky keeps it pinned to the top of .npp's scroll container as
+     the menu auto-scrolls to follow the current canto.
+
+     The bar is an Apple-style frosted-glass surface: semi-transparent
+     white background with backdrop blur, a layered soft shadow, and
+     an inset top highlight that simulates light catching the edge
+     of a glass surface. */
+
+  /* === Left-side menu header (S / – / i) ===
+     Lives at the left edge of the viewport in its own fixed-position
+     element, mirroring the right-side .npp column (which holds the
+     canto numbers) so both columns share the same 10vw width and the
+     text in the middle gets the full 80vw.
+
+     No background or gradient — the menu sits on the left margin where
+     the verse text doesn't reach, so there's nothing behind the icons
+     that needs masking. */
+  .menu-head{
+    position:fixed;
+    top:0;
+    left:0;
+    width:10vw;
+    z-index:10000000;
+    text-align:center;
+  }
+  /* Same 1.3em rhythm as the right-column numbers, so the icons share
+     the page's vertical spacing pattern. */
+  .menu-head > div{padding-top:1.3em}
+
+  .srch{
+    cursor:pointer;
+    color:#000;
+  }
+  .night .srch{color:#fff}
+  .srch:after{content:"S"}
+  .srch.open:after{content:"×"}
+
+  /* === Apple-style glass search bar ===
+     Pushed harder for a more visibly glassy surface:
+     - lower background opacity → more of the blur shows through
+     - higher blur radius → softer, more diffused backdrop
+     - higher saturation → richer colour through the blur
+     - stronger inset highlights → catches more "light" on the rim */
+  .search-bar{
+    position:fixed;
+    /* env(safe-area-inset-top) clears the iPhone notch / Dynamic Island
+       on devices that report it, and falls back to 0px otherwise — so
+       on older iPhones and Android the bar still sits 20px from the top. */
+    /* Vertical alignment with the left-menu icons: the S/× sits at
+       menu-head's first child, with padding-top:1.3em from the top
+       of the viewport. The bar has .4em vertical padding and the
+       input inside has its own .1em vertical padding — so the input
+       text is .5em below the bar's top edge. Setting top to
+       (1.3em - .5em) puts the input text at exactly 1.3em from
+       the viewport top, level with the S/× baseline. */
+    top:calc(1.3em - .5em + env(safe-area-inset-top, 0px));
+    /* Bar left edge at 10vw — same horizontal position as the right
+       edge of the left menu column (which holds the S/× toggle at
+       width:10vw centred). The input itself, after the bar's .8em
+       left padding, sits vertically under the S so clicking the
+       toggle and clicking into the input feel anchored to the same
+       column. Right edge at 15vw gives 75vw bar width. */
+    left:10vw;
+    right:15vw;
+    /* z-index must clear .background (999999999). */
+    z-index:1000000001;
+    /* Smooth fade-in matching the focus gradient and credits panel
+       (.4s cubic-bezier easing, opacity-driven). display stays flex
+       always; visibility toggles with .open so the bar is taken out
+       of the tab order when hidden. */
+    display:flex;
+    visibility:hidden;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .4s cubic-bezier(0.4, 0, 0.2, 1),
+               visibility 0s linear .4s;
+    align-items:center;
+    gap:.4em;
+    padding:.4em .8em;
+    border-radius:999px;
+
+    /* ===== iOS Safari fix =====
+       The combination of position:fixed + backdrop-filter is a known
+       bug on iOS Safari: the browser puts the element into the wrong
+       compositing layer and it scrolls with the page instead of
+       staying pinned to the viewport. Forcing our own GPU layer with
+       translateZ(0) + will-change resolves it on every iOS version
+       that supports backdrop-filter (14+), and is harmless elsewhere. */
+    transform:translateZ(0);
+    -webkit-transform:translateZ(0);
+    will-change:transform,opacity;
+    /* isolation:isolate gives us our own stacking context independent
+       of any ancestor, which also stabilises the backdrop on iOS. */
+    isolation:isolate;
+
+    /* More solid background (was 0.5) so the bar visually pops out
+       from the page rather than fading into it. The blur still does
+       its glass thing behind, but the surface itself is more present. */
+    background:rgba(255,255,255,0.78);
+    -webkit-backdrop-filter:saturate(200%) blur(50px);
+    backdrop-filter:saturate(200%) blur(50px);
+
+    /* Stronger shadow (was 0.06/0.16 alpha at 8/28px) — denser and
+       deeper, so the bar reads as floating noticeably above the page. */
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.8),
+      inset 0 -1px 0 rgba(0,0,0,0.04),
+      0 0 0 0.5px rgba(255,255,255,0.5),
+      0 12px 24px rgba(0,0,0,0.10),
+      0 36px 72px -10px rgba(0,0,0,0.24);
+  }
+  .search-bar.open{
+    visibility:visible;
+    opacity:1;
+    pointer-events:auto;
+    /* Override the visibility delay on the way in — visibility flips
+       immediately, opacity then animates from 0 to 1. */
+    transition:opacity .4s cubic-bezier(0.4, 0, 0.2, 1),
+               visibility 0s linear 0s;
+  }
+
+  .search-input{
+    flex:1 1 auto;
+    min-width:0;
+    font:inherit;
+    color:#000;
+    background:transparent;
+    border:none;
+    outline:none;
+    padding:.1em .3em;
+  }
+  /* Force opacity:1 — some browsers default placeholder to ~54% opacity. */
+  .search-input::placeholder{
+    color:#000;
+    opacity:1;
+    /* The placeholder color animates via its own opacity transition.
+       On focus the rule below drops it to 0 over 250ms so "Cerca…"
+       fades out gracefully when the user starts to type — instead
+       of vanishing the instant a key is pressed (browser default). */
+    transition:opacity .25s ease-in-out;
+  }
+  .search-input:focus::placeholder{opacity:0}
+
+  .search-count{
+    font:inherit;
+    color:#000;
+    white-space:nowrap;
+    flex-shrink:0;
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* Wrapper for the prev/next pair — keeps them visually adjacent
+     (just a thin gap between them) without affecting the spacing
+     of the input and count to their left. */
+  .search-arrows{
+    display:flex;
+    align-items:center;
+    gap:.4em;
+    flex-shrink:0;
+  }
+
+  .search-prev,.search-next{
+    cursor:pointer;
+    font:inherit;
+    color:#000;
+    line-height:1;
+    /* Tighter horizontal padding (was .4em) so the two arrows sit
+       closer together inside their flex group — just a space between. */
+    padding:.2em .15em;
+    flex-shrink:0;
+    user-select:none;
+  }
+  .search-prev:after{content:"Up"}
+  .search-next:after{content:"Down"}
+  /* Hidden via display:none rather than just dimmed, so before the
+     user has typed anything (or when there are zero matches) the bar
+     is just an input field — Up/Down only appear once they're
+     actually useful. */
+  .search-prev.disabled,.search-next.disabled{display:none}
+
+  /* Match highlights — same RGB values as .high (per-cantica verse colour).
+     padding:0 keeps the highlighted span the EXACT width of the underlying
+     letters; previously the 0.05em horizontal padding nudged surrounding
+     letters slightly outward and made the letter-spacing look off around
+     wrapped words. */
+  mark.search-hit{color:inherit;padding:0;border-radius:.15em;transition:background .15s ease-in-out}
+  .inferno mark.search-hit{background:rgba(255,99,71,.4)}
+  .purgatorio mark.search-hit{background:rgba(0,255,155,.4)}
+  .paradiso mark.search-hit{background:rgba(0,155,255,.4)}
+  .inferno mark.search-hit.current{background:rgb(255,99,71)}
+  .purgatorio mark.search-hit.current{background:rgb(0,255,155)}
+  .paradiso mark.search-hit.current{background:rgb(0,155,255)}
+
+  /* === FOCUS MODE ===
+     Clicking the – button toggles body.focus, which fades the side
+     menus and the tercet-number markers fully out — leaving only the
+     verse text and the active × button visible. Stronger than the
+     previous 0.15 dim because the user wants those elements totally
+     out of view while reading. The × stays visible (overridden below)
+     so the user can still turn focus mode off. */
+  .menu-head > div,.npp,.riga{
+    transition:opacity .4s cubic-bezier(0.4, 0, 0.2, 1),
+               filter .4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  body.focus .menu-head > div,
+  body.focus .npp,
+  body.focus .riga{
+    opacity:0;
+    /* pointer-events:none on .npp so the now-invisible canto links
+       can't catch clicks aimed at the verse text underneath. */
+    pointer-events:none;
+  }
+  /* The – button (now showing × via .clicked) is the way out of focus
+     mode, so it must stay fully visible and clickable. The .menu-head
+     parent is at z-index:10000000 — below .background's 999999999 —
+     and being position:fixed traps its children's z-index inside that
+     stacking context. So when focus mode is on, we lift the WHOLE
+     .menu-head above .background. The non-clicked icons (S, i) are
+     still individually dimmed/desaturated by the rule above, so the
+     reading-focus effect is preserved; only the .btt.clicked button
+     and any other override below escape the dim. */
+  body.focus .menu-head{
+    z-index:1000000000;
+  }
+  body.focus .menu-head > .btt.clicked{
+    opacity:1;
+    filter:none;
+    pointer-events:auto;
+  }
   /* NIGHTSHIFT */
   .night,.active{transition:color .2s ease-in-out, background .2s ease-in-out, opacity .2s ease-in-out}
   .night{background:#212529;color:#fff}
@@ -430,25 +778,37 @@
   z-index:999999999;}
   .night .credits{background-color:#212529!important;color:#fff!important}
   .night .in a:hover{opacity:.3;color:#fff!important}
-  /* SCREENS */
+  /* SCREENS
+     Below desktop, only the font scales and the tercet-number markers
+     disappear. Column widths, content margins, and paddings stay
+     identical to desktop — the user explicitly wanted no layout
+     reflow on resize, just smaller type and no clutter. */
   @media screen and (max-width:1000px){
   body,.titolo{font:30px/em Helvetica,serif}
-  .npp{width:auto;padding-right:10px}}
+  .poema{contain-intrinsic-size:auto 3500px}}
   @media screen and (max-width:700px){
-  #content{margin:0 10px}
   body,.titolo{font:16px/1.4em Helvetica,serif}
-  .npp,#content{padding-bottom:calc(100vh - 2.8em)}
-  .poema{margin-bottom:2.8em}
-  .courier{padding:0 3.5em}
+  .poema{margin-bottom:2.8em;contain-intrinsic-size:auto 2200px}
   .riga{display:none}}
   </style>
   </head>
   <body class=via>
+  <div class="menu-head">
+    <div title="Cerca" class="srch" role="button" tabindex="0" aria-label="Apri cerca"></div>
+    <div title="Focus" class="btt"></div>
+    <div title="Info" class="info"></div>
+  </div>
+  <div class="search-bar" role="search">
+    <input type="text" class="search-input" placeholder="Cerca…" aria-label="Cerca nel testo">
+    <span class="search-count" aria-live="polite"></span>
+    <div class="search-arrows">
+      <div class="search-prev" role="button" tabindex="0" aria-label="Risultato precedente"></div>
+      <div class="search-next" role="button" tabindex="0" aria-label="Risultato successivo"></div>
+    </div>
+  </div>
   <div class=yt>
   <div class="npp">
   <div class=in>
-  <div title="Focus" class=btt></div><br>
-  <div title="Info" class=info></div>
   <a href="#1uno">1</a>
   <div class=infe>
   <a href="#selva" class=selva>1.1</a>
@@ -20212,8 +20572,9 @@
   </div>
   <div class="credits opa">
   <div class=inner>
+  <div class=courier>
   NOTE A PIÈ DI PAGINA<br>
-  Progetto: <a href="https://thisisfed.xyz" target="_blank" rel="noopener">Federico Ferrari</a><br>Grazie: <a href="https://it.wikisource.org/wiki/Pagina_principale" target="_blank" rel="noopener">Wikisource</a>&nbsp;&nbsp;<a href="https://www.tumblr.com" target="_blank" rel="noopener">Tumblr️</a>&nbsp;&nbsp;<a href="https://panic.com/coda/" target="_blank" rel="noopener">Coda</a>&nbsp;&nbsp;<a href="https://stackoverflow.com" target="_blank" rel="noopener">Stackoverflow</a>&nbsp;&nbsp;<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a></div></div>
+  Progetto: <a href="https://thisisfed.xyz" target="_blank" rel="noopener">Federico Ferrari</a><br>Grazie: <a href="https://panic.com/coda/" target="_blank" rel="noopener">Coda</a>&nbsp;&nbsp;<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a>&nbsp;&nbsp;<a href="https://stackoverflow.com" target="_blank" rel="noopener">Stackoverflow</a>&nbsp;&nbsp;<a href="https://it.wikisource.org/wiki/Pagina_principale" target="_blank" rel="noopener">Wikisource</a></div></div></div>
   <script>
   /* === AUTO NIGHT / DAY THEME ===
      Sunrise/sunset computed from a longitude derived from the timezone
@@ -20360,6 +20721,7 @@
                   var legacyTarget = document.getElementById(raw.slice(1));
                   if (legacyTarget) {
                       setTimeout(function() {
+                          if (window.ensureRendered) window.ensureRendered(legacyTarget);
                           var top = legacyTarget.getBoundingClientRect().top + window.scrollY - 100;
                           smoothScrollTo(window, top, 800);
                       }, 1500);
@@ -20379,11 +20741,16 @@
                   Math.abs((data.totalTercets || tercets.length) - tercets.length) < 5
               ) {
                   var el = tercets[data.tercetIndex];
+                  // The saved tercet is somewhere down the document and
+                  // almost certainly inside a content-visibility:auto canto
+                  // that's currently skipped. Force-render before measuring.
+                  if (window.ensureRendered) window.ensureRendered(el);
                   scrollTarget = el.getBoundingClientRect().top + window.scrollY - 120;
               } else if (data.anchor) {
                   // Fallback: chapter anchor
                   var anchorTarget = document.getElementById(data.anchor.slice(1));
                   if (anchorTarget) {
+                      if (window.ensureRendered) window.ensureRendered(anchorTarget);
                       scrollTarget = anchorTarget.getBoundingClientRect().top + window.scrollY - 100;
                   }
               }
@@ -20407,6 +20774,10 @@
       // Auto-save on scroll, throttled via requestAnimationFrame
       var ticking = false;
       window.addEventListener('scroll', function() {
+          // The resize stabilizer fires synthetic scrolls every resize event
+          // to pin the reader's tercet. Don't capture those as the user's
+          // "last reading position" — they're transient.
+          if (window.__isResizing) return;
           if (!ticking) {
               window.requestAnimationFrame(function() {
                   saveCurrentPosition();
@@ -20423,8 +20794,453 @@
           setTimeout(saveCurrentPosition, 1200);
       });
 
-      restorePosition();
+      // Position-memory restoration is disabled — the page always starts
+      // at the top on load. Saving is still active so the option could be
+      // re-enabled later by re-introducing the restorePosition() call.
+      // restorePosition();
   });
   </script>
   
+
+  <script>
+  // === RESIZE STABILIZATION ===
+  // The page uses fluid typography (font: 3vw) and viewport-based margins
+  // (50vh, 15vw), so any window resize reflows the entire document. The
+  // browser preserves the absolute pixel scroll position, which means the
+  // line you were reading slides up or down by however much the content
+  // above it grew or shrank. Meanwhile the scrollspy keeps re-detecting
+  // a new "current canto" on each resize-induced scroll event and animates
+  // the side menu in response. Together that reads as jitter.
+  //
+  // Strategy: continuously track which <span class="riga"> tercet sits at
+  // the top of the viewport during normal reading, and on every resize
+  // event re-pin that same tercet to the top after reflow. Tercets are
+  // stable structural markers (one per 3-line stanza in document order),
+  // so this survives the typographic reflow that resize triggers.
+  document.addEventListener('DOMContentLoaded', function() {
+      var tercets = document.querySelectorAll('span.riga');
+      if (!tercets.length) return;
+
+      // The Y-coordinate we treat as "the top" — matches the offset used
+      // by the position-memory module so both agree on which tercet is
+      // the user's current anchor.
+      var TRIGGER_Y = 120;
+
+      // The last tercet known to be at the top during normal reading.
+      // Captured continuously from scroll events when NOT resizing, so by
+      // the time a resize burst begins it holds the correct pre-reflow
+      // anchor.
+      var anchorIndex = 0;
+
+      var isResizing = false;
+      var resizeEndTimer = null;
+
+      function getTopTercetIndex() {
+          var best = 0;
+          for (var i = 0; i < tercets.length; i++) {
+              var top = tercets[i].getBoundingClientRect().top;
+              if (top <= TRIGGER_Y) best = i;
+              else break; // tercets are in document order
+          }
+          return best;
+      }
+
+      function pinAnchorToTop() {
+          var el = tercets[anchorIndex];
+          if (!el) return;
+          var top = el.getBoundingClientRect().top + window.scrollY - TRIGGER_Y;
+          // Synchronous scroll — never smooth here. Animation would compound
+          // with rapid-fire resize events into exactly the jitter we're
+          // suppressing.
+          window.scrollTo(0, top);
+      }
+
+      // Continuously track the anchor during normal scrolling. Suppressed
+      // while resizing because the values would already reflect post-reflow
+      // positions and overwrite the pre-resize anchor we need to preserve.
+      var ticking = false;
+      window.addEventListener('scroll', function() {
+          if (isResizing) return;
+          if (!ticking) {
+              window.requestAnimationFrame(function() {
+                  anchorIndex = getTopTercetIndex();
+                  ticking = false;
+              });
+              ticking = true;
+          }
+      }, { passive: true });
+
+      // Initial capture so the first resize (before any scroll) has a valid
+      // anchor to restore to.
+      anchorIndex = getTopTercetIndex();
+
+      // Public flag — scrollspy and position-memory consult this to opt out
+      // of fighting the user during a resize burst.
+      window.__isResizing = false;
+
+      window.addEventListener('resize', function() {
+          if (!isResizing) {
+              // First event of this burst — anchorIndex still holds the
+              // pre-resize value because the scroll listener above stops
+              // updating it from this point on.
+              isResizing = true;
+              window.__isResizing = true;
+          }
+          // Re-pin on every resize event so the line stays glued mid-drag,
+          // not just after the user releases the window edge.
+          pinAnchorToTop();
+
+          // Debounce the "resize finished" signal. 180ms is long enough to
+          // absorb the last few stragglers from a drag, short enough that
+          // normal scrolling resumes feeling instant.
+          clearTimeout(resizeEndTimer);
+          resizeEndTimer = setTimeout(function() {
+              // One final correction in case the last resize event arrived
+              // mid-rAF and the layout was still settling when we pinned.
+              pinAnchorToTop();
+              isResizing = false;
+              window.__isResizing = false;
+          }, 180);
+      });
+  });
+  </script>
+
+  <script>
+  // === SEARCH ===
+  // Free-text search across the verse text. Wraps matches in <mark> tags
+  // and provides keyboard navigation (Enter / Shift+Enter / Escape).
+  //
+  // Why search works across lazy-rendered cantos:
+  // content-visibility:auto skips paint and layout, not the DOM. textContent
+  // and TreeWalker traversal are unaffected, so we can find matches inside
+  // cantos that haven't been rendered yet. When scrolling to a match,
+  // ensureRendered() force-renders the enclosing canto first so the
+  // getBoundingClientRect measurement is accurate.
+  document.addEventListener('DOMContentLoaded', function() {
+      var toggle  = document.querySelector('.srch');
+      var bar     = document.querySelector('.search-bar');
+      var input   = document.querySelector('.search-input');
+      var count   = document.querySelector('.search-count');
+      var prevBtn = document.querySelector('.search-prev');
+      var nextBtn = document.querySelector('.search-next');
+      if (!toggle || !bar || !input) return;
+
+      var hits = [];        // current array of <mark.search-hit> elements
+      var currentIdx = -1;  // index of the highlighted hit
+
+      // Italian readers may type without accents — "pieta" should find
+      // "pietà". NFD decomposition splits "à" into "a" + combining grave,
+      // then we strip the combining marks. Done on both query and source
+      // text so the comparison is symmetric.
+      //
+      // We also normalize typographic apostrophes/quotes: the verse uses
+      // curly apostrophes (U+2019) for elision — "l'alta", "ch'i'vi" —
+      // but a normal keyboard produces straight apostrophes (U+0027), so
+      // without normalization a query like "l'alta" would silently fail
+      // to match. We collapse the whole apostrophe/quote family to a
+      // single straight apostrophe.
+      function fold(s) {
+          return s
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')        // strip combining accents
+              .replace(/[\u2018\u2019\u201A\u201B\u02BC\u02B9\u0060\u00B4]/g, "'") // → straight '
+              .replace(/[\u201C\u201D\u201E\u201F]/g, '"')                          // curly " → straight "
+              .toLowerCase();
+      }
+
+      function clearHighlights() {
+          var parents = new Set();
+          document.querySelectorAll('mark.search-hit').forEach(function(mark) {
+              parents.add(mark.parentNode);
+              mark.parentNode.replaceChild(
+                  document.createTextNode(mark.textContent),
+                  mark
+              );
+          });
+          // normalize() merges the adjacent text nodes we just created
+          // back into single text nodes — important because otherwise
+          // repeated searches would shred the DOM into thousands of
+          // tiny text-node fragments.
+          parents.forEach(function(p) { p.normalize(); });
+          hits = [];
+          currentIdx = -1;
+      }
+
+      // Wrap every occurrence of `lowerQuery` inside one text node with
+      // <mark>. Builds a document fragment in one pass to avoid mutating
+      // the tree while we're walking the same node.
+      function wrapMatchesInNode(textNode, lowerQuery) {
+          var text = textNode.textContent;
+          var foldedText = fold(text);
+          var qLen = lowerQuery.length;
+          var lastIdx = 0;
+          var idx;
+          var fragment = document.createDocumentFragment();
+
+          while ((idx = foldedText.indexOf(lowerQuery, lastIdx)) >= 0) {
+              if (idx > lastIdx) {
+                  fragment.appendChild(document.createTextNode(text.substring(lastIdx, idx)));
+              }
+              var mark = document.createElement('mark');
+              mark.className = 'search-hit';
+              // Use the original (un-folded) slice so the visible text
+              // keeps its accents and casing.
+              mark.textContent = text.substring(idx, idx + qLen);
+              fragment.appendChild(mark);
+              hits.push(mark);
+              lastIdx = idx + qLen;
+          }
+
+          if (lastIdx === 0) return; // no matches; leave node untouched
+
+          if (lastIdx < text.length) {
+              fragment.appendChild(document.createTextNode(text.substring(lastIdx)));
+          }
+          textNode.parentNode.replaceChild(fragment, textNode);
+      }
+
+      function runSearch(query) {
+          clearHighlights();
+          updateCount();
+          if (!query || query.length < 2) return;
+
+          var lowerQuery = fold(query);
+
+          // Walk #content (everything inside .poema blocks + intro/credits
+          // text), but exclude the right-side menu, the search bar itself,
+          // and the .background overlay. We previously walked only .poema
+          // which silently skipped intro paragraphs, .canto headers, and
+          // any verse text that lived outside a .poema container — that
+          // was the source of "some words don't get highlighted".
+          var root = document.getElementById('content') || document.body;
+          var walker = document.createTreeWalker(
+              root,
+              NodeFilter.SHOW_TEXT,
+              {
+                  acceptNode: function(node) {
+                      var p = node.parentElement;
+                      if (!p) return NodeFilter.FILTER_REJECT;
+                      // Tercet numbers (3, 6, 9…) get injected into
+                      // .riga spans by the page's own JS; skipping them
+                      // prevents "3" matching every stanza marker.
+                      if (p.closest('.riga')) return NodeFilter.FILTER_REJECT;
+                      // UI chrome — never search the menu, the bar itself,
+                      // the background overlay, scripts, or style blocks.
+                      if (p.closest('.npp,.search-bar,.background,script,style,.credits'))
+                          return NodeFilter.FILTER_REJECT;
+                      if (!node.nodeValue || !node.nodeValue.trim()) {
+                          return NodeFilter.FILTER_REJECT;
+                      }
+                      return NodeFilter.FILTER_ACCEPT;
+                  }
+              }
+          );
+
+          // Collect first, then mutate — mutating during a TreeWalker
+          // traversal can skip or revisit nodes unpredictably.
+          var nodes = [];
+          var node;
+          while ((node = walker.nextNode())) nodes.push(node);
+          nodes.forEach(function(n) { wrapMatchesInNode(n, lowerQuery); });
+
+          updateCount();
+          if (hits.length) goToHit(0);
+      }
+
+      function updateCount() {
+          if (!count) return;
+          var hasQuery = input.value && input.value.length >= 2;
+          if (!hits.length) {
+              count.textContent = hasQuery ? '( 0 )' : '';
+          } else {
+              count.textContent = '( ' + (currentIdx + 1) + ' / ' + hits.length + ' )';
+          }
+          // Arrows look inert when there's nothing to navigate, both to
+          // signal "no matches" and to prevent stray clicks from firing
+          // goToHit on an empty hits array.
+          if (prevBtn) prevBtn.classList.toggle('disabled', hits.length === 0);
+          if (nextBtn) nextBtn.classList.toggle('disabled', hits.length === 0);
+      }
+
+      function goToHit(idx) {
+          if (!hits.length) return;
+          // Wrap-around navigation: pressing "next" past the end loops
+          // to the first hit, "prev" before the start to the last.
+          idx = ((idx % hits.length) + hits.length) % hits.length;
+          if (currentIdx >= 0 && hits[currentIdx]) {
+              hits[currentIdx].classList.remove('current');
+          }
+          currentIdx = idx;
+          var target = hits[currentIdx];
+          target.classList.add('current');
+
+          // === LAYOUT-STABLE SCROLL ===
+          // Cantos use content-visibility:auto with a guessed intrinsic
+          // height of 5500px. The real height only materialises when the
+          // canto enters the viewport. If we just compute target.top and
+          // animate to it, intermediate cantos rendering mid-scroll shift
+          // the document under us and the target ends up off-screen
+          // (the symptom: "word disappears after a few clicks").
+          //
+          // Fix: render every canto from the top of the document up to
+          // and INCLUDING the target's canto before measuring. Anything
+          // below the target can still be lazy — its shifting doesn't
+          // affect the target's absolute position.
+          var targetCanto = target.closest('.poema');
+          if (targetCanto) {
+              var cantos = document.querySelectorAll('.poema');
+              for (var i = 0; i < cantos.length; i++) {
+                  if (cantos[i].style.contentVisibility !== 'visible') {
+                      cantos[i].style.contentVisibility = 'visible';
+                  }
+                  if (cantos[i] === targetCanto) break;
+              }
+              // Force synchronous layout so the upcoming
+              // getBoundingClientRect reflects the post-render geometry.
+              void document.body.offsetHeight;
+          }
+
+          // Centre the match in the viewport: scroll so the middle of
+          // the match aligns with the middle of the screen.
+          //
+          // Use visualViewport.height when available — it reports the
+          // actually-visible viewport, which on mobile shrinks while the
+          // on-screen keyboard is up. Centering against window.innerHeight
+          // alone (the layout viewport, which doesn't shrink with the
+          // keyboard) would place the match behind the keyboard while
+          // the user is still typing. visualViewport is supported in
+          // every modern mobile browser (iOS Safari 13+, Chrome, Samsung
+          // Internet, Firefox) and falls back gracefully to innerHeight.
+          var rect = target.getBoundingClientRect();
+          var viewportH = (window.visualViewport && window.visualViewport.height)
+                       || window.innerHeight;
+          var viewportTop = (window.visualViewport && window.visualViewport.offsetTop) || 0;
+          var top = rect.top + window.scrollY
+                  - viewportTop
+                  - (viewportH - rect.height) / 2;
+          if (typeof smoothScrollTo === 'function') {
+              smoothScrollTo(window, top, 600);
+          } else {
+              window.scrollTo(0, top);
+          }
+          updateCount();
+      }
+
+      // --- Open / close the widget ---
+      // The .open class lives on both the toggle (so the S flips to ×)
+      // and the bar (so it shows). Keep them in sync — they're separate
+      // DOM nodes but share a single conceptual state.
+      function openSearch() {
+          toggle.classList.add('open');
+          bar.classList.add('open');
+          // We deliberately do NOT auto-focus the input here. Auto-focus
+          // would instantly trigger :focus → the placeholder fades to 0
+          // before the user has even seen it. Letting the user tap into
+          // the field themselves means they see "Cerca…", then watch
+          // it fade out on click — which is the explicit behaviour the
+          // user asked for.
+      }
+      function closeSearch() {
+          toggle.classList.remove('open');
+          bar.classList.remove('open');
+          input.value = '';
+          clearHighlights();
+          updateCount();
+      }
+
+      toggle.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (toggle.classList.contains('open')) closeSearch();
+          else openSearch();
+      });
+
+      // --- Prev / next arrow handlers ---
+      function navigate(delta) {
+          if (!hits.length) return;
+          // Explicitly blur the input so the on-screen keyboard dismisses
+          // and the user can actually see the highlighted match. iOS
+          // Safari, Android Chrome, and Samsung Internet all keep the
+          // keyboard up unless something forces a blur — tapping a
+          // non-input button doesn't reliably shift focus on touch
+          // devices the way clicking does on desktop. Blurring the
+          // input is the one signal every mobile browser respects.
+          if (document.activeElement === input) {
+              input.blur();
+          }
+          goToHit(currentIdx + delta);
+          // Note: we do NOT refocus the input afterwards. Any
+          // programmatic .focus() on iOS Safari instantly re-summons
+          // the keyboard, which would defeat the blur we just did and
+          // bring the keyboard back over the match the user is trying
+          // to read. The arrows are primarily for touch/pointer users;
+          // desktop users navigate with Enter / Shift+Enter, during
+          // which the input already has focus naturally.
+      }
+      if (prevBtn) {
+          prevBtn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              navigate(-1);
+          });
+          prevBtn.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate(-1);
+              }
+          });
+      }
+      if (nextBtn) {
+          nextBtn.addEventListener('click', function(e) {
+              e.stopPropagation();
+              navigate(1);
+          });
+          nextBtn.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  navigate(1);
+              }
+          });
+      }
+
+      // --- Input handling ---
+      var debounceTimer = null;
+      input.addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          var q = input.value;
+          // 220ms is a reasonable trade-off: long enough that typing
+          // "fiamma" doesn't trigger 6 full document walks, short enough
+          // that the result feels live.
+          debounceTimer = setTimeout(function() { runSearch(q); }, 220);
+      });
+
+      input.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+              e.preventDefault();
+              if (!hits.length) return;
+              goToHit(currentIdx + (e.shiftKey ? -1 : 1));
+          } else if (e.key === 'Escape') {
+              e.preventDefault();
+              closeSearch();
+          }
+      });
+
+      // Clicking anywhere outside the bar (or the S itself) closes the
+      // bar and resets the S to its un-clicked state. This includes
+      // clicking on the verse text — the user explicitly asked for this.
+      document.addEventListener('click', function(e) {
+          if (!toggle.classList.contains('open')) return;
+          if (bar.contains(e.target) || toggle.contains(e.target)) return;
+          closeSearch();
+      });
+
+      // Initialise the disabled state so Up/Down start hidden (the CSS
+      // rule .search-prev.disabled { display: none } only fires once
+      // the class is present). Without this, the buttons would be
+      // visible the first time the bar opens, before any query has
+      // been typed, until something triggers updateCount() later.
+      updateCount();
+  });
+  </script>
+
+<script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
+
 </body></html>
