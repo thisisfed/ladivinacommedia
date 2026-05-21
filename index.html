@@ -30,6 +30,15 @@
   
     <!-- Favicon -->
     <link rel="shortcut icon" href="https://ladivinacommedia.thisisfed.xyz/favicon.ico">
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-J9FD0VJKPW"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-J9FD0VJKPW');
+    </script>
   
     <!-- Schema.org Structured Data -->
     <script type="application/ld+json">
@@ -544,9 +553,9 @@
      one continuous bottom border under the whole block. .1em thickness
      scales with the body font so it reads consistently across
      breakpoints. */
-  .inferno .high{text-decoration:underline #ff5722 .1em;text-underline-offset:.15em}
-  .purgatorio .high{text-decoration:underline #00c853 .1em;text-underline-offset:.15em}
-  .paradiso .high{text-decoration:underline #2979ff .1em;text-underline-offset:.15em}
+  .inferno .high{text-decoration:underline #ff5722 .1em;text-underline-offset:.3em}
+  .purgatorio .high{text-decoration:underline #00c853 .1em;text-underline-offset:.3em}
+  .paradiso .high{text-decoration:underline #2979ff .1em;text-underline-offset:.3em}
   .via{opacity:0;transition:opacity .2s ease-in-out;}
   .info,.btt{cursor:pointer}
   .info:after{content:"i"}
@@ -596,7 +605,7 @@
     color:#000;
   }
   .night .srch{color:#fff}
-  .srch:after{content:"C"}
+  .srch:after{content:"⌕"}
   .srch.open:after{content:"×"}
 
   /* === Apple-style glass search bar ===
@@ -700,6 +709,11 @@
     border:none;
     outline:none;
     padding:.1em .3em;
+    /* First letter typed is shown as uppercase (cosmetic only — the
+       underlying value sent to runSearch() is unchanged, so matches
+       still find lowercase occurrences in the text). Matches the
+       capital C in "Cerca…" placeholder for visual consistency. */
+    text-transform:capitalize;
   }
   /* Force opacity:1 — some browsers default placeholder to ~54% opacity. */
   .search-input::placeholder{
@@ -761,7 +775,7 @@
     background:transparent;
     padding:0;
     text-decoration:underline currentColor .1em;
-    text-underline-offset:.15em;
+    text-underline-offset:.3em;
     transition:text-decoration-color .15s ease-in-out;
   }
   .inferno mark.search-hit{text-decoration-color:rgba(255,87,34,.55)}
@@ -21004,6 +21018,41 @@
               }
               isResizing = false;
               window.__isResizing = false;
+
+              // === RIGHT-MENU RESYNC AFTER RESIZE ===
+              // The scrollspy that follows the right menu measures canto
+              // positions via getBoundingClientRect(). With
+              // content-visibility:auto, cantos that haven't been seen yet
+              // use a 5500px placeholder height. Post-resize, the document
+              // is a mix of real heights (rendered cantos) and placeholder
+              // heights (un-rendered ones below the user). The scrollspy
+              // then computes positions in a stale coordinate space and
+              // can wrongly conclude that the "current section" is near
+              // the bottom — auto-scrolling the right menu to the end
+              // instead of following what the user is reading.
+              //
+              // Fix: after the resize settles, force-render every canto
+              // from the top of the document down to the bottom of the
+              // current viewport. After this, every canto position the
+              // user has scrolled past or is currently seeing is measured
+              // against accurate geometry. Then dispatch a scroll event
+              // to nudge the scrollspy to re-evaluate.
+              var viewportBottom = window.scrollY + window.innerHeight;
+              var cantos = document.querySelectorAll('.poema');
+              for (var i = 0; i < cantos.length; i++) {
+                  if (cantos[i].style.contentVisibility !== 'visible') {
+                      cantos[i].style.contentVisibility = 'visible';
+                  }
+                  // Stop once we've rendered past the visible viewport —
+                  // cantos below stay lazy.
+                  var rect = cantos[i].getBoundingClientRect();
+                  if (rect.top + window.scrollY > viewportBottom) break;
+              }
+              // Force sync layout so the scrollspy's next read sees the
+              // post-render geometry, not stale rects.
+              void document.body.offsetHeight;
+              // Trigger the scrollspy to recompute with fresh positions.
+              window.dispatchEvent(new Event('scroll'));
           }, 180);
       });
   });
@@ -21247,9 +21296,17 @@
       function closeSearch() {
           toggle.classList.remove('open');
           bar.classList.remove('open');
-          input.value = '';
-          clearHighlights();
-          updateCount();
+          // Defer clearing the input until after the bar's 400ms fade-out
+          // completes. Clearing immediately would make the placeholder
+          // ("Cerca…") visible behind whatever text the user had typed,
+          // which then becomes briefly visible as the bar fades out —
+          // a jarring flash. By the time this timeout fires, the bar's
+          // opacity is at 0 so the value-reset is invisible.
+          setTimeout(function() {
+              input.value = '';
+              clearHighlights();
+              updateCount();
+          }, 400);
       }
 
       toggle.addEventListener('click', function(e) {
