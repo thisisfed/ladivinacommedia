@@ -62,16 +62,33 @@
     <script>
   /* Smooth-scroll helper — replaces jQuery's $.animate({scrollTop}, ms).
      Cancels any in-flight animation on the same element so successive
-     calls don't fight (equivalent to jQuery's .stop().animate()). */
+     calls don't fight (equivalent to jQuery's .stop().animate()).
+
+     Motion-sickness considerations:
+     - Honour prefers-reduced-motion: users who've asked for less
+       animation in their OS settings get instant jumps, no scroll
+       motion at all.
+     - Use ease-out (cubic) instead of ease-in-out: scrolls start
+       fast and decelerate, instead of accelerating-and-braking.
+       Easier on the inner ear, since the motion never reverses
+       in apparent velocity. */
   (function() {
       var inFlight = new WeakMap();
-      function easeInOutQuad(t) {
-          return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      var prefersReducedMotion = window.matchMedia
+          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      function easeOutCubic(t) {
+          return 1 - Math.pow(1 - t, 3);
       }
       window.smoothScrollTo = function(element, targetTop, duration) {
           var prev = inFlight.get(element);
           if (prev) cancelAnimationFrame(prev);
           var isWindow = element === window;
+          // Reduced-motion users get an instant jump regardless of duration.
+          if (prefersReducedMotion) {
+              if (isWindow) window.scrollTo(0, targetTop);
+              else element.scrollTop = targetTop;
+              return;
+          }
           var start = isWindow ? window.scrollY : element.scrollTop;
           var change = targetTop - start;
           if (change === 0 || duration <= 0) {
@@ -82,7 +99,7 @@
           var startTime = performance.now();
           function step(now) {
               var t = Math.min((now - startTime) / duration, 1);
-              var newTop = start + change * easeInOutQuad(t);
+              var newTop = start + change * easeOutCubic(t);
               if (isWindow) window.scrollTo(0, newTop);
               else element.scrollTop = newTop;
               if (t < 1) inFlight.set(element, requestAnimationFrame(step));
@@ -169,7 +186,7 @@
       }
 
       var top = target.getBoundingClientRect().top + window.scrollY;
-      smoothScrollTo(window, top, 1100);
+      smoothScrollTo(window, top, 450);
   });
   </script>
   <script>
@@ -256,7 +273,7 @@
               var targetTop = active.getBoundingClientRect().top
                             - container.getBoundingClientRect().top
                             + container.scrollTop;
-              smoothScrollTo(container, targetTop, 1100);
+              smoothScrollTo(container, targetTop, 350);
           });
       });
   });
@@ -332,7 +349,7 @@
                                    + container.scrollTop;
                   // smoothScrollTo cancels any in-flight animation on the same
                   // element, so this stays smooth even on rapid scroll.
-                  smoothScrollTo(container, activeOffset, 400);
+                  smoothScrollTo(container, activeOffset, 250);
               }
           }
       }
@@ -20772,7 +20789,7 @@
                       setTimeout(function() {
                           if (window.ensureRendered) window.ensureRendered(legacyTarget);
                           var top = legacyTarget.getBoundingClientRect().top + window.scrollY - 100;
-                          smoothScrollTo(window, top, 800);
+                          smoothScrollTo(window, top, 350);
                       }, 1500);
                   }
               }
@@ -20805,7 +20822,7 @@
               }
 
               if (scrollTarget !== null) {
-                  smoothScrollTo(window, scrollTarget, 800);
+                  smoothScrollTo(window, scrollTarget, 350);
               }
 
               // Sync the menu highlight to the restored chapter
@@ -21269,7 +21286,7 @@
                   - viewportTop
                   - (viewportH - rect.height) / 2;
           if (typeof smoothScrollTo === 'function') {
-              smoothScrollTo(window, top, 600);
+              smoothScrollTo(window, top, 300);
           } else {
               window.scrollTo(0, top);
           }
