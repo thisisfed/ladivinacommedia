@@ -585,6 +585,21 @@
   .info.clicked:after{content:"×"}
   .btt:after{content:"–"}
   .btt.clicked:after{content:"×"}
+  /* Chapter-up arrow: hidden until the user has scrolled past a
+     canto's first line, then fades in as a hint that they can jump
+     back to the start of the current canto. Cute upward arrow,
+     same .1.3em rhythm as the other icons. */
+  .chapter-up:after{content:"\2303"}
+  .chapter-up{
+    opacity:0;
+    pointer-events:none;
+    cursor:pointer;
+    transition:opacity .3s ease-in-out;
+  }
+  .chapter-up.visible{
+    opacity:1;
+    pointer-events:auto;
+  }
   .last{margin-bottom:0!important}
   .in a{padding-top:1.3em}
   .active{color:#212529}
@@ -649,7 +664,17 @@
        text is .5em below the bar's top edge. Setting top to
        (1.3em - .5em) puts the input text at exactly 1.3em from
        the viewport top, level with the S/× baseline. */
-    top:calc(1.3em - .5em + env(safe-area-inset-top, 0px));
+    /* Vertical alignment with the left-menu icons + visual-viewport
+       compensation. On iOS Safari, when the on-screen keyboard is up,
+       position:fixed elements remain anchored to the LAYOUT viewport
+       (which scrolls under the keyboard), not the VISIBLE viewport.
+       So the bar would slide off-screen above the keyboard during
+       auto-scroll while typing. Adding var(--vv-offset-top), updated
+       by JS from window.visualViewport, keeps the bar at the top of
+       the visible area regardless of where iOS has put the layout
+       viewport. Defaults to 0 when no keyboard / no visualViewport
+       support, in which case the calc reduces to the original. */
+    top:calc(1.3em - .5em + var(--vv-offset-top, 0px) + env(safe-area-inset-top, 0px));
     /* Bar at 75vw, symmetric 12.5vw margins — centred on viewport. */
     left:12.5vw;
     right:12.5vw;
@@ -739,13 +764,12 @@
   .search-input::placeholder{
     color:#000;
     opacity:1;
-    /* The placeholder color animates via its own opacity transition.
-       On focus the rule below drops it to 0 over 250ms so "Cerca…"
-       fades out gracefully when the user starts to type — instead
-       of vanishing the instant a key is pressed (browser default). */
+    /* The placeholder stays visible at full opacity while the input
+       is focused but empty, so the user sees "Cerca…" the whole
+       time the keyboard is up waiting for input. It disappears
+       naturally (browser default) once any character is typed. */
     transition:opacity .25s ease-in-out;
   }
-  .search-input:focus::placeholder{opacity:0}
 
   .search-count{
     font:inherit;
@@ -798,9 +822,9 @@
     text-underline-offset:.3em;
     transition:text-decoration-color .15s ease-in-out;
   }
-  .inferno mark.search-hit{text-decoration-color:rgba(255,87,34,.55)}
-  .purgatorio mark.search-hit{text-decoration-color:rgba(0,200,83,.55)}
-  .paradiso mark.search-hit{text-decoration-color:rgba(41,121,255,.55)}
+  .inferno mark.search-hit{text-decoration-color:rgba(255,87,34,.3)}
+  .purgatorio mark.search-hit{text-decoration-color:rgba(0,200,83,.3)}
+  .paradiso mark.search-hit{text-decoration-color:rgba(41,121,255,.3)}
   .inferno mark.search-hit.current{text-decoration-color:#ff5722}
   .purgatorio mark.search-hit.current{text-decoration-color:#00c853}
   .paradiso mark.search-hit.current{text-decoration-color:#2979ff}
@@ -869,9 +893,10 @@
     <div title="Cerca" class="srch" role="button" tabindex="0" aria-label="Apri cerca"></div>
     <div title="Focus" class="btt"></div>
     <div title="Info" class="info"></div>
+    <div title="Inizio del canto" class="chapter-up" role="button" tabindex="0" aria-label="Vai all'inizio del canto"></div>
   </div>
   <div class="search-bar" role="search">
-    <input type="text" inputmode="none" class="search-input" placeholder="Cerca…" aria-label="Cerca nel testo">
+    <input type="text" class="search-input" placeholder="Cerca…" aria-label="Cerca nel testo">
     <span class="search-count" aria-live="polite"></span>
     <div class="search-arrows">
       <div class="search-prev" role="button" tabindex="0" aria-label="Risultato precedente"></div>
@@ -21217,7 +21242,54 @@
           nodes.forEach(function(n) { wrapMatchesInNode(n, lowerQuery); });
 
           updateCount();
-          if (hits.length) goToHit(0);
+          // Schedule auto-scroll. On desktop this is immediate. On
+          // mobile (touch device) it's debounced: waits for typing to
+          // stop, then blurs the input to dismiss the keyboard, then
+          // scrolls once the keyboard has animated off-screen. This
+          // way the target lands in the fully-visible viewport rather
+          // than behind the keyboard.
+          scheduleAutoScroll();
+      }
+
+      // Detect virtual-keyboard environment once at load. Touch
+      // devices (phones, tablets, touch laptops) get the
+      // debounce-blur-scroll flow; non-touch desktops get immediate
+      // scroll as before.
+      var hasVirtualKeyboard = ('ontouchstart' in window
+          || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0));
+
+      var autoScrollTimer = null;
+      function cancelAutoScroll() {
+          if (autoScrollTimer) {
+              clearTimeout(autoScrollTimer);
+              autoScrollTimer = null;
+          }
+      }
+
+      function scheduleAutoScroll() {
+          cancelAutoScroll();
+          if (!hits.length) return;
+
+          if (!hasVirtualKeyboard) {
+              // Desktop: immediate, no keyboard to dismiss.
+              goToHit(0);
+              return;
+          }
+
+          // Mobile: debounce 350ms after the last keystroke. Once the
+          // user has stopped typing, blur the input to dismiss the
+          // keyboard. Wait 300ms for the keyboard's slide-down
+          // animation, then scroll. By the time the scroll happens,
+          // the visual viewport is fully restored and the target can
+          // be cleanly centred.
+          autoScrollTimer = setTimeout(function() {
+              autoScrollTimer = null;
+              if (!hits.length) return;
+              input.blur();
+              setTimeout(function() {
+                  if (hits.length) goToHit(0);
+              }, 300);
+          }, 350);
       }
 
       function updateCount() {
@@ -21225,6 +21297,11 @@
           var hasQuery = input.value && input.value.length >= 2;
           if (!hits.length) {
               count.textContent = hasQuery ? '( 0 )' : '';
+          } else if (currentIdx < 0) {
+              // Matches exist but the user hasn't tapped Giù/Su yet.
+              // Show 0 / N so they know how many matches are there
+              // without the page auto-scrolling to one.
+              count.textContent = '( 0 / ' + hits.length + ' )';
           } else {
               count.textContent = '( ' + (currentIdx + 1) + ' / ' + hits.length + ' )';
           }
@@ -21248,53 +21325,82 @@
           target.classList.add('current');
 
           // === LAYOUT-STABLE SCROLL ===
-          // Cantos use content-visibility:auto with a guessed intrinsic
-          // height of 5500px. The real height only materialises when the
-          // canto enters the viewport. If we just compute target.top and
-          // animate to it, intermediate cantos rendering mid-scroll shift
-          // the document under us and the target ends up off-screen
-          // (the symptom: "word disappears after a few clicks").
+          // The previous approaches (manual Y computation, native
+          // scrollIntoView, two-stage instant+smooth) all failed in
+          // different ways when content-visibility:auto cantos along
+          // the path lazy-rendered mid-scroll. The native APIs don't
+          // re-target the destination as the document height shifts.
           //
-          // Fix: render every canto from the top of the document up to
-          // and INCLUDING the target's canto before measuring. Anything
-          // below the target can still be lazy — its shifting doesn't
-          // affect the target's absolute position.
+          // This custom smooth-scroll recomputes the target's position
+          // EVERY ANIMATION FRAME, so however much the document shrinks
+          // (as placeholder cantos turn into real ones along the path),
+          // the scroll always converges on the target. Brain reads it
+          // as one smooth motion, ends up centred on the target.
+          //
+          // Still force-render the target's own canto first so its
+          // getBoundingClientRect returns its real height (not the
+          // 5500px placeholder) — that gives the FIRST frame's
+          // estimate a sensible starting value.
           var targetCanto = target.closest('.poema');
-          if (targetCanto) {
-              var cantos = document.querySelectorAll('.poema');
-              for (var i = 0; i < cantos.length; i++) {
-                  if (cantos[i].style.contentVisibility !== 'visible') {
-                      cantos[i].style.contentVisibility = 'visible';
-                  }
-                  if (cantos[i] === targetCanto) break;
-              }
-              // Force synchronous layout so the upcoming
-              // getBoundingClientRect reflects the post-render geometry.
+          if (targetCanto && targetCanto.style.contentVisibility !== 'visible') {
+              targetCanto.style.contentVisibility = 'visible';
               void document.body.offsetHeight;
           }
 
-          // Centre the match in the viewport: scroll so the middle of
-          // the match aligns with the middle of the screen.
-          //
-          // Use visualViewport.height when available — it reports the
-          // actually-visible viewport, which on mobile shrinks while the
-          // on-screen keyboard is up. Centering against window.innerHeight
-          // alone (the layout viewport, which doesn't shrink with the
-          // keyboard) would place the match behind the keyboard while
-          // the user is still typing. visualViewport is supported in
-          // every modern mobile browser (iOS Safari 13+, Chrome, Samsung
-          // Internet, Firefox) and falls back gracefully to innerHeight.
-          var rect = target.getBoundingClientRect();
-          var viewportH = (window.visualViewport && window.visualViewport.height)
-                       || window.innerHeight;
-          var viewportTop = (window.visualViewport && window.visualViewport.offsetTop) || 0;
-          var top = rect.top + window.scrollY
-                  - viewportTop
-                  - (viewportH - rect.height) / 2;
-          if (typeof smoothScrollTo === 'function') {
-              smoothScrollTo(window, top, 200);
+          var reduceMotion = window.matchMedia
+              && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+          function getTargetY() {
+              var r = target.getBoundingClientRect();
+              var vH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+              var vTop = (window.visualViewport && window.visualViewport.offsetTop) || 0;
+              // Detect keyboard via input focus. iOS Safari sometimes
+              // reports visualViewport.height as the full layout height
+              // even with the keyboard up — the keyboard sits as an
+              // overlay rather than shrinking the viewport. Centering
+              // the target against that "full" height puts it BEHIND
+              // the keyboard. If the input is focused, assume keyboard
+              // is up and place the target at 35% from the top of the
+              // visible area — high enough to clear the keyboard on
+              // any common device, low enough to not feel jammed at
+              // the top.
+              var inputFocused = document.activeElement
+                  && document.activeElement.classList
+                  && document.activeElement.classList.contains('search-input');
+              var anchorRatio = inputFocused ? 0.35 : 0.5;
+              return r.top + window.scrollY - vTop - vH * anchorRatio + r.height / 2;
+          }
+
+          if (reduceMotion) {
+              window.scrollTo(0, Math.max(0, getTargetY()));
           } else {
-              window.scrollTo(0, top);
+              // Continuous-retarget smooth scroll. Each frame:
+              // - read the target's CURRENT position (post any
+              //   layout shifts from this frame's renders)
+              // - interpolate from startY to current target using
+              //   easeOutCubic
+              // Result: smooth motion that lands accurately even as
+              // the document height changes during the scroll.
+              var startTime = performance.now();
+              var startY = window.scrollY;
+              var duration = 400;
+              if (window.__goToHitRAF) cancelAnimationFrame(window.__goToHitRAF);
+              var stepFn = function(now) {
+                  var t = Math.min((now - startTime) / duration, 1);
+                  var eased = 1 - Math.pow(1 - t, 3);
+                  var currentTargetY = getTargetY();
+                  var newY = startY + (currentTargetY - startY) * eased;
+                  window.scrollTo(0, Math.max(0, newY));
+                  if (t < 1) {
+                      window.__goToHitRAF = requestAnimationFrame(stepFn);
+                  } else {
+                      // Final settle — one more correction in case the
+                      // very last frame's layout shifted things.
+                      window.scrollTo(0, Math.max(0, getTargetY()));
+                      window.__goToHitRAF = null;
+                  }
+              };
+              window.__goToHitRAF = requestAnimationFrame(stepFn);
           }
           updateCount();
       }
@@ -21306,14 +21412,18 @@
       function openSearch() {
           toggle.classList.add('open');
           bar.classList.add('open');
-          // We deliberately do NOT auto-focus the input here. Auto-focus
-          // would instantly trigger :focus → the placeholder fades to 0
-          // before the user has even seen it. Letting the user tap into
-          // the field themselves means they see "Cerca…", then watch
-          // it fade out on click — which is the explicit behaviour the
-          // user asked for.
+          // Auto-focus the input so the on-screen keyboard comes up
+          // immediately on mobile — the user can start typing without
+          // an extra tap. On iOS Safari, focus() must be called
+          // synchronously inside the user-gesture handler (the click
+          // on the lens) for the keyboard to appear; calling it in a
+          // setTimeout would silently fail. The "Cerca…" placeholder
+          // stays visible at full opacity while focused-and-empty,
+          // so the user still sees it as they orient.
+          input.focus();
       }
       function closeSearch() {
+          cancelAutoScroll();
           toggle.classList.remove('open');
           bar.classList.remove('open');
           // Defer clearing the input until after the bar's 400ms fade-out
@@ -21336,8 +21446,18 @@
       });
 
       // --- Prev / next arrow handlers ---
+      // Track the time of the last navigate() call. iOS Safari sometimes
+      // synthesises a click event at the touch location when the
+      // on-screen keyboard dismisses (which input.blur() triggers). If
+      // that synthetic click lands outside the bar, the click-outside
+      // handler below would close it. A short grace period after
+      // navigate suppresses these spurious closes.
+      var lastNavigateTime = 0;
+
       function navigate(delta) {
           if (!hits.length) return;
+          cancelAutoScroll();
+          lastNavigateTime = Date.now();
           // Explicitly blur the input so the on-screen keyboard dismisses
           // and the user can actually see the highlighted match. iOS
           // Safari, Android Chrome, and Samsung Internet all keep the
@@ -21348,14 +21468,23 @@
           if (document.activeElement === input) {
               input.blur();
           }
-          goToHit(currentIdx + delta);
+          // First-tap case: currentIdx is -1 because the user hasn't
+          // navigated yet (we no longer auto-jump to the first match).
+          // Giù should go to hit 0; Su should go to the LAST hit.
+          // The general wrap-around math below would land Su on
+          // length-2 instead of length-1, so special-case this.
+          var target;
+          if (currentIdx < 0) {
+              target = delta > 0 ? 0 : hits.length - 1;
+          } else {
+              target = currentIdx + delta;
+          }
+          goToHit(target);
           // Note: we do NOT refocus the input afterwards. Any
           // programmatic .focus() on iOS Safari instantly re-summons
           // the keyboard, which would defeat the blur we just did and
           // bring the keyboard back over the match the user is trying
-          // to read. The arrows are primarily for touch/pointer users;
-          // desktop users navigate with Enter / Shift+Enter, during
-          // which the input already has focus naturally.
+          // to read.
       }
       if (prevBtn) {
           prevBtn.addEventListener('click', function(e) {
@@ -21396,8 +21525,7 @@
       input.addEventListener('keydown', function(e) {
           if (e.key === 'Enter') {
               e.preventDefault();
-              if (!hits.length) return;
-              goToHit(currentIdx + (e.shiftKey ? -1 : 1));
+              navigate(e.shiftKey ? -1 : 1);
           } else if (e.key === 'Escape') {
               e.preventDefault();
               closeSearch();
@@ -21410,6 +21538,12 @@
       document.addEventListener('click', function(e) {
           if (!toggle.classList.contains('open')) return;
           if (bar.contains(e.target) || toggle.contains(e.target)) return;
+          // Grace period after navigate (~500ms): iOS Safari can fire
+          // a synthetic click outside the bar when the keyboard
+          // dismisses, which would otherwise close the bar right after
+          // tapping Su/Giù. The user explicitly asked the bar to stay
+          // open across wrap-around navigations especially.
+          if (Date.now() - lastNavigateTime < 500) return;
           closeSearch();
       });
 
@@ -21419,6 +21553,109 @@
       // visible the first time the bar opens, before any query has
       // been typed, until something triggers updateCount() later.
       updateCount();
+
+      // === iOS visualViewport TRACKING ===
+      // On iOS Safari, position:fixed anchors to the layout viewport,
+      // not the visible viewport. When the on-screen keyboard is up,
+      // the layout viewport shifts under the keyboard while the bar
+      // appears to slide off-screen above. Updating --vv-offset-top
+      // via visualViewport.offsetTop keeps the bar pinned to the top
+      // of the visible area regardless of keyboard state. Safari
+      // 13+, Chrome, Edge, Firefox 91+ all support visualViewport;
+      // older browsers fall back to top:0 (the CSS variable defaults
+      // to 0px so the calc still works).
+      if (window.visualViewport) {
+          var updateVVOffset = function() {
+              document.documentElement.style.setProperty(
+                  '--vv-offset-top',
+                  window.visualViewport.offsetTop + 'px'
+              );
+          };
+          window.visualViewport.addEventListener('resize', updateVVOffset);
+          window.visualViewport.addEventListener('scroll', updateVVOffset);
+          // Initialise on load so the offset is correct even before
+          // the first keyboard event.
+          updateVVOffset();
+      }
+  });
+  </script>
+
+  <script>
+  /* === CHAPTER-UP ARROW ===
+     Always visible once the user has scrolled past the very top of
+     the page. The arrow's TARGET (which canto's start to jump to)
+     updates as the user scrolls into different cantos. Hides only
+     at the very top of the page where there's nothing to jump back
+     to. */
+  document.addEventListener('DOMContentLoaded', function() {
+      var arrow = document.querySelector('.chapter-up');
+      if (!arrow) return;
+      var cantos = document.querySelectorAll('.poema');
+      if (!cantos.length) return;
+
+      var currentCanto = null;
+
+      function update() {
+          // Hide only at the very top of the page (within 200px of
+          // page top). Nothing to jump back to here.
+          if (window.scrollY < 200) {
+              arrow.classList.remove('visible');
+              currentCanto = null;
+              return;
+          }
+
+          // Anywhere below that — find which canto the user is
+          // currently inside and set it as the anchor target.
+          // Always show the arrow (visibility is no longer tied to
+          // distance from the canto's start, only to distance from
+          // the page top).
+          var found = null;
+          var scrollY = window.scrollY;
+          for (var i = 0; i < cantos.length; i++) {
+              var rect = cantos[i].getBoundingClientRect();
+              var top = rect.top + scrollY;
+              var bottom = top + rect.height;
+              if (top <= scrollY && bottom > scrollY) {
+                  found = cantos[i];
+                  break;
+              }
+          }
+
+          if (found) {
+              arrow.classList.add('visible');
+              currentCanto = found;
+          } else {
+              // Edge case — no canto matches (e.g., scrolled into
+              // the bottom padding past the last canto). Keep the
+              // arrow visible anchored to the last canto so the
+              // user still has a way home.
+              arrow.classList.add('visible');
+              currentCanto = cantos[cantos.length - 1];
+          }
+      }
+
+      // Throttle via rAF — scroll events fire dozens of times per
+      // second, but we only need to update once per frame.
+      var ticking = false;
+      window.addEventListener('scroll', function() {
+          if (!ticking) {
+              window.requestAnimationFrame(function() {
+                  update();
+                  ticking = false;
+              });
+              ticking = true;
+          }
+      }, {passive: true});
+
+      arrow.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (currentCanto) {
+              currentCanto.scrollIntoView({
+                  behavior: 'smooth',
+                  block: 'start'
+              });
+          }
+      });
   });
   </script>
 
