@@ -87,6 +87,7 @@
           if (prefersReducedMotion) {
               if (isWindow) window.scrollTo(0, targetTop);
               else element.scrollTop = targetTop;
+              inFlight.delete(element);
               return;
           }
           var start = isWindow ? window.scrollY : element.scrollTop;
@@ -94,6 +95,7 @@
           if (change === 0 || duration <= 0) {
               if (isWindow) window.scrollTo(0, targetTop);
               else element.scrollTop = targetTop;
+              inFlight.delete(element);
               return;
           }
           var startTime = performance.now();
@@ -152,7 +154,8 @@
   document.addEventListener('DOMContentLoaded', function() {
       document.body.classList.remove('via');
       setTimeout(function() {
-          document.getElementById('content').classList.toggle('no');
+          var content = document.getElementById('content');
+          if (content) content.classList.add('no');
       }, 2200);
   });
   </script>
@@ -397,7 +400,7 @@
               });
               ticking = true;
           }
-      });
+      }, {passive: true});
 
       // Initial state on page load
       updateActiveMenu();
@@ -21275,6 +21278,15 @@
           autoScrollTimer = setTimeout(function() {
               autoScrollTimer = null;
               if (!hits.length) return;
+              // Set lastNavigateTime BEFORE blur — iOS Safari fires a
+              // synthetic click at the original touch coordinates when
+              // the keyboard dismisses, which can land outside the bar
+              // (everything's shifted up post-keyboard) and trigger
+              // the click-outside listener below. The 500ms grace
+              // check there reads lastNavigateTime; without this line,
+              // it's still zero and the search closes right after
+              // auto-scrolling. Same protection as navigate().
+              lastNavigateTime = Date.now();
               input.blur();
               setTimeout(function() {
                   if (hits.length) goToHit(0);
@@ -21686,6 +21698,14 @@
           clearTarget();
       }, {passive: true});
       document.addEventListener('keydown', function(e) {
+          // Ignore keydowns inside form inputs — space and arrow keys
+          // are normal characters/navigation in the search field, not
+          // scrolling input. Without this guard, typing "amor che a
+          // nullo amato" into search would clear arrowTarget on every
+          // space.
+          var t = e.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+                    || t.isContentEditable)) return;
           var k = e.key;
           if (k === 'PageUp' || k === 'PageDown' || k === 'Home'
               || k === 'End' || k === 'ArrowUp' || k === 'ArrowDown'
@@ -21874,9 +21894,6 @@
       }
   });
   </script>
-
-<script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
-
 
 <script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
 
