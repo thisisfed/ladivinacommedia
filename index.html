@@ -126,6 +126,26 @@
           void canto.offsetHeight;
           return canto;
       };
+
+      /* Force-render every canto from the start of the document up to
+         and including `targetCanto`, then sync layout. After this call,
+         getBoundingClientRect on any element at or above the target
+         reflects real geometry instead of content-visibility:auto's
+         5500px placeholder. Used by the anchor-click smooth scroll and
+         the resize-stabilizer pin — both need accurate positions for a
+         target that's likely far down a document full of un-rendered
+         cantos. */
+      window.renderCantosUpTo = function(targetCanto) {
+          if (!targetCanto) return;
+          var cantos = document.querySelectorAll('.poema');
+          for (var i = 0; i < cantos.length; i++) {
+              if (cantos[i].style.contentVisibility !== 'visible') {
+                  cantos[i].style.contentVisibility = 'visible';
+              }
+              if (cantos[i] === targetCanto) break;
+          }
+          void document.body.offsetHeight;
+      };
   })();
   </script>
   <script>
@@ -163,22 +183,14 @@
       // enter the viewport, replacing their 5500px guess with actual
       // heights, the document shifts, and the target ends up off-screen.
       //
-      // Pre-rendering every canto from the start of the document up to
-      // and including the target's canto guarantees the layout is
-      // stable before we measure, so the smooth scroll lands exactly
-      // on the anchor. Same approach used by the search-arrow nav.
+      // renderCantosUpTo pre-renders every canto from the start of the
+      // document up to and including the target's canto, so the layout
+      // is stable before we measure and the smooth scroll lands exactly
+      // on the anchor. Same approach used by the search-arrow nav and
+      // the resize stabilizer.
       var targetCanto = target.closest('.poema');
       if (targetCanto) {
-          var cantos = document.querySelectorAll('.poema');
-          for (var i = 0; i < cantos.length; i++) {
-              if (cantos[i].style.contentVisibility !== 'visible') {
-                  cantos[i].style.contentVisibility = 'visible';
-              }
-              if (cantos[i] === targetCanto) break;
-          }
-          // Force synchronous layout so the next getBoundingClientRect
-          // reflects the post-render geometry.
-          void document.body.offsetHeight;
+          window.renderCantosUpTo(targetCanto);
       } else if (window.ensureRendered) {
           // Target isn't inside a .poema (e.g. credits anchor) — fall
           // back to single-element render.
@@ -200,6 +212,20 @@
 
       if (btt) {
           btt.addEventListener('click', function() {
+              // Mirror what the info handler does when it closes
+              // focus mode. Without this, opening info → clicking
+              // focus leaves the info overlay visible alongside
+              // focus mode. Gated on info.clicked so we don't
+              // perform redundant class operations when info
+              // wasn't open. No scroll position changes — these
+              // are all overlay class toggles only.
+              if (info && info.classList.contains('clicked')) {
+                  info.classList.remove('clicked');
+                  if (credits) credits.classList.add('opa');
+                  if (npp) npp.classList.remove('over');
+                  document.body.classList.remove('over');
+              }
+
               this.classList.toggle('clicked');
               if (background) background.classList.toggle('opa');
               // body.focus drives the CSS that dims/desaturates everything
@@ -262,12 +288,6 @@
                   el.classList.remove('current');
               });
               this.classList.add('active');
-              // Preserved from original: $(this).find("a") finds nested <a>s.
-              // <a> can't legally contain <a>, so this is a no-op in practice,
-              // but kept for behavioral fidelity.
-              this.querySelectorAll('a').forEach(function(a) {
-                  a.classList.add('current');
-              });
 
               var container = document.querySelector('.npp');
               if (!container) return;
@@ -299,22 +319,29 @@
           }
       });
 
-      var isClickScrolling = false;
+      // Exposed on window so other scripts (the chapter-up arrow's
+      // own smooth-scroll loop) can suppress the scrollspy during
+      // their own click-driven scrolls — preventing it from flashing
+      // between wrong cantos as content-visibility placeholders give
+      // unreliable positions during the animation. Just a plain
+      // window property; reads and writes from any script see the
+      // same value.
+      window.__isClickScrolling = false;
 
       // When user clicks a menu link, suppress scrollspy briefly so the
       // smooth-scroll animation isn't fought by the spy on its way down.
       menuLinks.forEach(function(link) {
           link.addEventListener('click', function() {
-              isClickScrolling = true;
+              window.__isClickScrolling = true;
               // Suppress the scrollspy while the click-driven scroll
               // is in flight, so it doesn't fight the user's choice
               // mid-animation. Matched to the new 280ms anchor scroll.
-              setTimeout(function() { isClickScrolling = false; }, 320);
+              setTimeout(function() { window.__isClickScrolling = false; }, 320);
           });
       });
 
       function updateActiveMenu() {
-          if (isClickScrolling) return;
+          if (window.__isClickScrolling) return;
           // During a resize burst, the resize stabilizer is repositioning the
           // viewport every event. Letting the scrollspy chase those transient
           // positions and animate the side menu in response is exactly the
@@ -383,7 +410,7 @@
           var n = 0;
           poem.querySelectorAll('span.riga').forEach(function(sp) {
               n += 3;
-              sp.innerHTML = n;
+              sp.textContent = n;
           });
       });
   });
@@ -403,11 +430,19 @@
   body{transition:color .4s ease-in-out, background .4s ease-in-out, opacity .4s ease-in-out;letter-spacing:.01em;border:0;color:#212529;background:#fff;margin:0;padding:0;width:100%;min-height:100%}
   body,.titolo{font:3vw/1.3em Helvetica,sans-serif;text-align:center}
   body > iframe:first-child {display: none !important}
-  h1,h2,h3{font-family:Helvetica;font-size:inherit;font-weight:inherit;display:inline;text-align:center}
+  h1,h2,h3{font-family:Helvetica,sans-serif;font-size:inherit;font-weight:inherit;display:inline;text-align:center}
   p{margin:0;padding:0;display:inline;}
   .high{transition:text-decoration-color .2s ease-in-out, color .2s ease-in-out}
   .in a:hover{opacity:.3;color:#212529!important}
   .in a{transition:opacity .1s ease-in-out,color .1s ease-in-out}
+  /* Sub-canto markers (the decimal entries like 1.1, 2.6, 3.7 that
+     point to famous verses) always have a class attribute matching
+     their famous-verse anchor (e.g. class="selva"). Integer canto
+     markers (1, 2, 3...) have no class. Dim the decimal ones to
+     0.3 opacity so the main canto numbers stand out visually.
+     Exclude .active and .current so the scrollspy's highlighted
+     marker stays at full opacity even when it's a decimal. */
+  .in a[class]:not(.active):not(.current){opacity:.3}
   /* INDEX */
   .titolo{text-align:center;cursor:pointer;}
   .npp{text-align:center;position:fixed;padding:0 0 calc(100vh - 2.6em) 0;right:0;top:0;height:100%;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;transition:opacity .2s ease-in-out;z-index:10000000;scrollbar-width:none;-ms-overflow-style:none}
@@ -542,7 +577,16 @@
   }
   /* CREDITS */
   .credits{transition:opacity.2s ease-in-out;padding:10px;display:table;
-  position:fixed;top:0;left:0;width:100%;height:100%;background-color:rgba(255,255,255,1);z-index:10000;box-sizing:border-box}
+  /* height:100% on position:fixed elements resolves to the SMALL
+     viewport on iOS Safari (URL bar visible). When the URL bar
+     hides on scroll, the visible area grows but the panel stays
+     the old size — main text shows through at the bottom.
+     100dvh (dynamic viewport height) tracks the actual visible
+     viewport, growing/shrinking with URL bar transitions.
+     100vh is the fallback for older browsers (resolves to the
+     large viewport, so the panel may extend below visible area
+     when URL bar is shown — but the visible area is fully covered). */
+  position:fixed;top:0;left:0;width:100%;height:100vh;height:100dvh;background-color:rgba(255,255,255,1);z-index:10000;box-sizing:border-box}
   .inner{vertical-align:bottom;display:table-cell;}
   /* Inside .credits the courier should be full-opacity (black on white
      in day, white on dark in night via the .night .credits rule below
@@ -551,7 +595,7 @@
      editorial intros but wrong for the credits panel where the text
      IS the panel's content rather than commentary on it. */
   .credits .courier{opacity:1}
-  .courier,.inner{font-family:Helvetica}
+  .courier,.inner{font-family:Helvetica,sans-serif}
   .trans{opacity:.1!important}
   .npp{width:10vw}
   .emo{word-spacing:21vw}
@@ -560,13 +604,13 @@
   .opacity{opacity:0.5;transition:opacity .2s ease-in-out}
   .opa{opacity:0!important;user-select:none;pointer-events:none;}
   .center,.canto{text-align:center}
-  .riga{float:right;font-family:Helvetica;opacity:.3;user-select:none}
+  .riga{float:right;font-family:Helvetica,sans-serif;opacity:.3;user-select:none}
   .courier{width:80%;margin:0 auto;padding:0;text-align:justify;opacity:.3}
   .border{border-bottom:1px solid}
   .over{overflow:hidden}
   a{color:inherit;text-decoration:none;border-bottom:.05em solid;}
   a:hover{border:none}
-  .inf,.pur,.par,.sans{font-family:Helvetica}
+  .inf,.pur,.par,.sans{font-family:Helvetica,sans-serif}
   .inf,.infe,.inferno h3 {color:#ff5722}
   .pur,.purg,.purgatorio h3{color:#00c853}
   .par,.para,.paradiso h3{color:#2979ff}
@@ -764,11 +808,14 @@
   .search-input::placeholder{
     color:#000;
     opacity:1;
-    /* The placeholder stays visible at full opacity while the input
-       is focused but empty, so the user sees "Cerca…" the whole
-       time the keyboard is up waiting for input. It disappears
-       naturally (browser default) once any character is typed. */
+    /* Fades to 0 ~1s after the search bar opens (class toggled by
+       openSearch()). The 0.25s transition lets "Cerca…" disappear
+       smoothly once the user has had a beat to register it, rather
+       than vanishing the instant the field gains focus. */
     transition:opacity .25s ease-in-out;
+  }
+  .search-input.placeholder-hidden::placeholder{
+    opacity:0;
   }
 
   .search-count{
@@ -869,9 +916,12 @@
   .night,.active{transition:color .2s ease-in-out, background .2s ease-in-out, opacity .2s ease-in-out}
   .night{background:#212529;color:#fff}
   .night .active{color: #fff}
-  .night .background{
-  background: linear-gradient(rgba(33,37,41,1) 0%, rgba(33,37,41,0) 35%, rgba(33,37,41,0)65%, rgba(33,37,41,1)100%);
-  z-index:999999999;}
+  /* No .night .background override needed: the day-mode .background
+     rule already sets z-index and the pseudo-element gradients
+     (.night .background::before / ::after, defined earlier) provide
+     the dark top/bottom fades. The previous override added a full-
+     height linear gradient on .background itself which doubled up
+     with the pseudo-element gradients at the edges. */
   .night .credits{background-color:#212529!important;color:#fff!important}
   .night .in a:hover{opacity:.3;color:#fff!important}
   /* SCREENS
@@ -880,12 +930,24 @@
      identical to desktop — the user explicitly wanted no layout
      reflow on resize, just smaller type and no clutter. */
   @media screen and (max-width:1000px){
-  body,.titolo{font:30px/em Helvetica,serif}
+  body,.titolo{font:30px/1.3em Helvetica,sans-serif}
   .poema{contain-intrinsic-size:auto 3500px}}
   @media screen and (max-width:700px){
-  body,.titolo{font:16px/1.4em Helvetica,serif}
+  body,.titolo{font:14px/1.3em Helvetica,sans-serif}
   .poema{margin-bottom:2.8em;contain-intrinsic-size:auto 2200px}
-  .riga{display:none}}
+  .riga{display:none}
+  /* Mobile content sizing. Trade-off between:
+     - long verses (~298px at 14px) needing content ≥ this width
+     - 3-digit decimal menu numbers like "100.9" (~29px at 13px)
+       needing menu columns wide enough to contain them
+     Solution: menus 9vw (≥34px on any phone ≥375px), content
+     margin 9vw → content 82vw (≥308px), no overlap between
+     menu numbers and verse text. */
+  .menu-head,.npp{width:9vw}
+  .npp{font-size:13px}
+  #content{margin:1.3em 9vw 0 9vw}
+  .search-bar{left:10vw;right:10vw}
+  }
   </style>
   </head>
   <body class=via>
@@ -20661,7 +20723,7 @@
   ma già volgeva il mio disio e ’l velle,<br>
   sì come rota ch’igualmente è mossa,<span class=riga></span><br><br>
   
-  <div id=finetre><p>l’amor che move il sole e l’altre stelle</p>.</div>
+  <div id=finetre><p>l’amor che move il sole e l’altre stelle.</p></div>
   <br>
   <div id=fine class="sans center">Fine</div>
   </div>  
@@ -20671,96 +20733,18 @@
   <div class=inner>
   <div class=courier>
   NOTE A PIÈ DI PAGINA<br>
-  Progetto: <a href="https://thisisfed.xyz" target="_blank" rel="noopener">Federico Ferrari</a><br>Grazie: <a href="https://panic.com/coda/" target="_blank" rel="noopener">Coda</a>&nbsp;&nbsp;<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a>&nbsp;&nbsp;<a href="https://stackoverflow.com" target="_blank" rel="noopener">Stackoverflow</a>&nbsp;&nbsp;<a href="https://it.wikisource.org/wiki/Pagina_principale" target="_blank" rel="noopener">Wikisource</a></div></div></div>
+  Progetto: <a href="https://github.com/thisisfed" target="_blank" rel="noopener">Federico Ferrari</a><br>Grazie: <a href="https://panic.com/coda/" target="_blank" rel="noopener">Coda</a>&nbsp;&nbsp;<a href="https://claude.ai" target="_blank" rel="noopener">Claude</a>&nbsp;&nbsp;<a href="https://stackoverflow.com" target="_blank" rel="noopener">Stackoverflow</a>&nbsp;&nbsp;<a href="https://it.wikisource.org/wiki/Pagina_principale" target="_blank" rel="noopener">Wikisource</a></div></div></div>
   <script>
-  /* === AUTO NIGHT / DAY THEME ===
-     Sunrise/sunset computed from a longitude derived from the timezone
-     offset and a latitude estimated from the IANA zone region — no
-     geolocation prompt, no third-party calls. Re-runs every minute so
-     the theme flips live for readers who are on the page when the
-     threshold is crossed. Recomputing each tick also handles midnight
-     rollover for long reading sessions without extra logic. */
-  (function () {
-      function standardOffsetMin() {
-          /* getTimezoneOffset on the current date reflects whatever DST is
-             in effect right now, which is wrong for estimating geographic
-             longitude — BST readers would be placed at 15°E instead of 0°,
-             shifting sunset an hour earlier. The STANDARD (non-DST) offset
-             for any zone is reliably the larger of January's and July's
-             offsets, since DST always advances the clock (= more negative
-             offset). This holds in both hemispheres. */
-          var y   = new Date().getFullYear();
-          var jan = new Date(y, 0, 1).getTimezoneOffset();
-          var jul = new Date(y, 6, 1).getTimezoneOffset();
-          return Math.max(jan, jul);
-      }
-      function estimateLatLng() {
-          /* Longitude from the standard timezone offset (15° per hour
-             west of UTC). Latitude estimated by IANA zone region —
-             accurate to within a few minutes of true sunrise/sunset
-             anywhere populated, which is plenty for a theme threshold. */
-          var lng = -standardOffsetMin() / 4;
-          var lat = 40;
-          try {
-              var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-              if      (/^Europe\//.test(tz))     lat = 50;
-              else if (/^Asia\//.test(tz))       lat = 30;
-              else if (/^Africa\//.test(tz))     lat = 5;
-              else if (/^Australia\//.test(tz))  lat = -30;
-              else if (/^Pacific\//.test(tz))    lat = -15;
-              else if (/^Antarctica\//.test(tz)) lat = -75;
-              /* Southern-hemisphere Americas — without this they'd
-                 inherit the 40°N default and have sunrise/sunset offset
-                 by a season. */
-              else if (/^America\/(Argent|Sao_Paulo|Santiago|Buenos|Asunc|Caracas|La_Paz|Lima|Bogota|Guayaquil|Quito|Cayenne|Paramaribo|Montevideo|Punta_Arenas|Fortaleza|Recife|Manaus|Rio_Branco|Belem|Bahia)/.test(tz)) lat = -20;
-          } catch (e) {}
-          return { lat: lat, lng: lng };
-      }
-      function computeSun(date, lat, lng) {
-          /* Standard solar-calculator formulas. -0.83° altitude is the
-             civil sunrise/sunset definition (atmospheric refraction +
-             sun's disc). Math.round (not floor): Julian Dates roll over
-             at noon UTC, so before noon UTC the fractional part would
-             otherwise pick yesterday's day-number — that would lock
-             a morning reader into the previous day's sunset and keep
-             night theme through the whole morning. */
-          var rad = Math.PI / 180;
-          var jd  = date.getTime() / 86400000 + 2440587.5;
-          var n   = Math.round(jd - 2451545.0 + 0.0008);
-          var J   = n - lng / 360;
-          var M   = (357.5291 + 0.98560028 * J) % 360;
-          var C   = 1.9148 * Math.sin(M * rad)
-                  + 0.0200 * Math.sin(2 * M * rad)
-                  + 0.0003 * Math.sin(3 * M * rad);
-          var lam = (M + C + 180 + 102.9372) % 360;
-          var Jt  = 2451545.0 + J
-                  + 0.0053 * Math.sin(M * rad)
-                  - 0.0069 * Math.sin(2 * lam * rad);
-          var del = Math.asin(Math.sin(lam * rad) * Math.sin(23.44 * rad));
-          var co  = (Math.sin(-0.83 * rad) - Math.sin(lat * rad) * Math.sin(del))
-                  / (Math.cos(lat * rad) * Math.cos(del));
-          if (co < -1) return { polar: 'day' };
-          if (co >  1) return { polar: 'night' };
-          var w = Math.acos(co) / rad;
-          return {
-              sunrise: (Jt - w / 360 - 2440587.5) * 86400000,
-              sunset:  (Jt + w / 360 - 2440587.5) * 86400000
-          };
-      }
-      function isNight(sun) {
-          if (sun.polar === 'day')   return false;
-          if (sun.polar === 'night') return true;
-          var now = Date.now();
-          return now < sun.sunrise || now >= sun.sunset;
-      }
-      var coords = estimateLatLng();
-      function apply() {
-          var night = isNight(computeSun(new Date(), coords.lat, coords.lng));
-          document.body.classList.toggle('night', night);
-      }
-      apply();
-      setInterval(apply, 60000);
-  })();
+  /* === AUTO NIGHT / DAY THEME — DISABLED ===
+     The page is locked to day mode. A previous version of this module
+     computed sunrise/sunset from a timezone-derived location and
+     toggled body.night on a per-minute interval; that's been retired
+     in favour of always-day. We still do a one-time removal on load
+     in case anything else (stale localStorage, inline style, etc.)
+     has the night class set, but there's no longer an interval.
+     To re-enable auto theme, restore the previous version of this
+     script from version control. */
+  document.body.classList.remove('night');
   </script><script>
   // === PRECISE READING POSITION MEMORY ===
   // Remembers the exact tercet you were reading, not just the chapter.
@@ -20775,6 +20759,14 @@
       // i.e. the verse the reader is most likely on right now.
       function findCurrentTercetIndex() {
           if (!tercets.length) return -1;
+          // .riga is display:none at ≤700px (mobile). Hidden elements
+          // return top:0 from getBoundingClientRect(), which would
+          // make every tercet appear above the trigger line and the
+          // loop would land on the LAST tercet — saving "the user is
+          // at the end of Paradiso" for every mobile scroll event.
+          // offsetParent is null when display:none and is cheaper
+          // than getComputedStyle for this check.
+          if (tercets[0].offsetParent === null) return -1;
           var triggerY = 120;
           var best = 0;
           for (var i = 0; i < tercets.length; i++) {
@@ -20868,32 +20860,38 @@
           }, 1500);
       }
 
-      // Auto-save on scroll, throttled via requestAnimationFrame
-      var ticking = false;
-      window.addEventListener('scroll', function() {
-          // The resize stabilizer fires synthetic scrolls every resize event
-          // to pin the reader's tercet. Don't capture those as the user's
-          // "last reading position" — they're transient.
-          if (window.__isResizing) return;
-          if (!ticking) {
-              window.requestAnimationFrame(function() {
-                  saveCurrentPosition();
-                  ticking = false;
-              });
-              ticking = true;
-          }
-      });
+      // Position-memory is fully disabled — the page always starts at
+      // the top on load, and we don't write to localStorage on every
+      // scroll either (which was pointless churn when nothing reads
+      // back the saved value). The findCurrentTercetIndex /
+      // saveCurrentPosition / restorePosition functions above are
+      // preserved as-is; to re-enable the feature, uncomment all three
+      // blocks below (the scroll listener, the click listener, and the
+      // restorePosition() call).
 
-      // Save shortly after a menu click (lets the smooth-scroll settle first)
-      document.addEventListener('click', function(event) {
-          var link = event.target.closest('a[href^="#"]');
-          if (!link) return;
-          setTimeout(saveCurrentPosition, 1200);
-      });
-
-      // Position-memory restoration is disabled — the page always starts
-      // at the top on load. Saving is still active so the option could be
-      // re-enabled later by re-introducing the restorePosition() call.
+      // // Auto-save on scroll, throttled via requestAnimationFrame
+      // var ticking = false;
+      // window.addEventListener('scroll', function() {
+      //     // The resize stabilizer fires synthetic scrolls every resize event
+      //     // to pin the reader's tercet. Don't capture those as the user's
+      //     // "last reading position" — they're transient.
+      //     if (window.__isResizing) return;
+      //     if (!ticking) {
+      //         window.requestAnimationFrame(function() {
+      //             saveCurrentPosition();
+      //             ticking = false;
+      //         });
+      //         ticking = true;
+      //     }
+      // });
+      //
+      // // Save shortly after a menu click (lets the smooth-scroll settle first)
+      // document.addEventListener('click', function(event) {
+      //     var link = event.target.closest('a[href^="#"]');
+      //     if (!link) return;
+      //     setTimeout(saveCurrentPosition, 1200);
+      // });
+      //
       // restorePosition();
   });
   </script>
@@ -20965,22 +20963,10 @@
           // cantos that haven't yet rendered with their real heights
           // (placeholders are 5500px each — vs real cantos which vary
           // widely). Either case gives a wrong getBoundingClientRect.
-          //
-          // Force-render every canto from the start of the document up
-          // to and including the anchor's canto, then sync layout. After
-          // this, the anchor's position is measured against accurate
-          // geometry, not placeholder estimates.
-          var anchorCanto = el.closest('.poema');
-          if (anchorCanto) {
-              var cantos = document.querySelectorAll('.poema');
-              for (var i = 0; i < cantos.length; i++) {
-                  if (cantos[i].style.contentVisibility !== 'visible') {
-                      cantos[i].style.contentVisibility = 'visible';
-                  }
-                  if (cantos[i] === anchorCanto) break;
-              }
-              void document.body.offsetHeight;  // force sync layout
-          }
+          // renderCantosUpTo force-renders every canto from the start
+          // up to and including the anchor's canto and syncs layout,
+          // so the measurement below sees accurate geometry.
+          window.renderCantosUpTo(el.closest('.poema'));
 
           var top = el.getBoundingClientRect().top + window.scrollY - TRIGGER_Y;
 
@@ -21118,6 +21104,10 @@
       var toggle  = document.querySelector('.srch');
       var bar     = document.querySelector('.search-bar');
       var input   = document.querySelector('.search-input');
+      // Holds the setTimeout id that fades "Cerca…" out ~1s after the
+      // bar opens. Tracked at this scope so closeSearch() can cancel
+      // it if the user closes the search before the second elapses.
+      var placeholderTimer = null;
       var count   = document.querySelector('.search-count');
       var prevBtn = document.querySelector('.search-prev');
       var nextBtn = document.querySelector('.search-next');
@@ -21324,6 +21314,15 @@
           var target = hits[currentIdx];
           target.classList.add('current');
 
+          // Reset the chapter-up arrow's chain. After a search jump,
+          // the user is mid-canto (wherever the match is). Their next
+          // arrow click should go to THIS canto's start, not chain
+          // off whatever the arrow's target was before the search
+          // (which was probably a canto far away from this hit).
+          if (window.__chapterUpClearTarget) {
+              window.__chapterUpClearTarget();
+          }
+
           // === LAYOUT-STABLE SCROLL ===
           // The previous approaches (manual Y computation, native
           // scrollIntoView, two-stage instant+smooth) all failed in
@@ -21418,22 +21417,40 @@
           // synchronously inside the user-gesture handler (the click
           // on the lens) for the keyboard to appear; calling it in a
           // setTimeout would silently fail. The "Cerca…" placeholder
-          // stays visible at full opacity while focused-and-empty,
-          // so the user still sees it as they orient.
+          // is visible at full opacity while the user orients, then
+          // fades out ~1s later (see placeholderTimer below) — long
+          // enough to register what the field is, short enough not
+          // to compete with whatever they start typing.
           input.focus();
+          input.classList.remove('placeholder-hidden');
+          if (placeholderTimer) clearTimeout(placeholderTimer);
+          placeholderTimer = setTimeout(function() {
+              input.classList.add('placeholder-hidden');
+              placeholderTimer = null;
+          }, 1000);
       }
       function closeSearch() {
           cancelAutoScroll();
           toggle.classList.remove('open');
           bar.classList.remove('open');
+          // Cancel any pending placeholder-fade timer from a recent
+          // open — otherwise it could fire after the user has
+          // reopened and re-shown the placeholder, hiding it early.
+          if (placeholderTimer) {
+              clearTimeout(placeholderTimer);
+              placeholderTimer = null;
+          }
           // Defer clearing the input until after the bar's 400ms fade-out
           // completes. Clearing immediately would make the placeholder
           // ("Cerca…") visible behind whatever text the user had typed,
           // which then becomes briefly visible as the bar fades out —
           // a jarring flash. By the time this timeout fires, the bar's
-          // opacity is at 0 so the value-reset is invisible.
+          // opacity is at 0 so the value-reset is invisible. Also
+          // remove the .placeholder-hidden class here so the next
+          // open starts with the placeholder visible again.
           setTimeout(function() {
               input.value = '';
+              input.classList.remove('placeholder-hidden');
               clearHighlights();
               updateCount();
           }, 400);
@@ -21582,60 +21599,53 @@
 
   <script>
   /* === CHAPTER-UP ARROW ===
-     Always visible once the user has scrolled past the very top of
-     the page. The arrow's TARGET (which canto's start to jump to)
-     updates as the user scrolls into different cantos. Hides only
-     at the very top of the page where there's nothing to jump back
-     to. */
+     State-tracked page-up navigation. Why state-tracked instead of
+     scrollY-based: content-visibility:auto cantos render asynchronously
+     after the smooth-scroll lands, shifting the document by hundreds
+     of pixels. Reading rect.top to determine "at canto start" becomes
+     unreliable. Instead, we explicitly track `arrowTarget` — the canto
+     the arrow last navigated to. Layout shifts don't affect this
+     reference; only the user can change it (by clicking arrow again
+     or actively scrolling). */
   document.addEventListener('DOMContentLoaded', function() {
       var arrow = document.querySelector('.chapter-up');
       if (!arrow) return;
       var cantos = document.querySelectorAll('.poema');
       if (!cantos.length) return;
 
-      var currentCanto = null;
+      // Single source of truth: what canto did the arrow last land on?
+      // null = no recent arrow nav (or user has scrolled away).
+      var arrowTarget = null;
+
+      function clearTarget() {
+          arrowTarget = null;
+      }
+
+      // Exposed so the search script can reset the arrow chain when
+      // it auto-navigates to a hit. After a search jump, the user is
+      // mid-canto (wherever the match is) — their next arrow click
+      // should go to that canto's start, not chain off whatever
+      // arrowTarget was before they opened the search.
+      window.__chapterUpClearTarget = clearTarget;
 
       function update() {
-          // Hide only at the very top of the page (within 200px of
-          // page top). Nothing to jump back to here.
-          if (window.scrollY < 200) {
+          // Visibility: hide if we navigated to canto I via the arrow
+          // (state-tracked, not subject to layout shifts), OR if scrollY
+          // is at/above canto I's start (covers manual scroll to top
+          // and page-load-at-top cases).
+          if (arrowTarget === cantos[0]) {
               arrow.classList.remove('visible');
-              currentCanto = null;
               return;
           }
-
-          // Anywhere below that — find which canto the user is
-          // currently inside and set it as the anchor target.
-          // Always show the arrow (visibility is no longer tied to
-          // distance from the canto's start, only to distance from
-          // the page top).
-          var found = null;
-          var scrollY = window.scrollY;
-          for (var i = 0; i < cantos.length; i++) {
-              var rect = cantos[i].getBoundingClientRect();
-              var top = rect.top + scrollY;
-              var bottom = top + rect.height;
-              if (top <= scrollY && bottom > scrollY) {
-                  found = cantos[i];
-                  break;
-              }
-          }
-
-          if (found) {
-              arrow.classList.add('visible');
-              currentCanto = found;
+          var firstRect = cantos[0].getBoundingClientRect();
+          var firstTop = firstRect.top + window.scrollY;
+          if (window.scrollY < firstTop + 5) {
+              arrow.classList.remove('visible');
           } else {
-              // Edge case — no canto matches (e.g., scrolled into
-              // the bottom padding past the last canto). Keep the
-              // arrow visible anchored to the last canto so the
-              // user still has a way home.
               arrow.classList.add('visible');
-              currentCanto = cantos[cantos.length - 1];
           }
       }
 
-      // Throttle via rAF — scroll events fire dozens of times per
-      // second, but we only need to update once per frame.
       var ticking = false;
       window.addEventListener('scroll', function() {
           if (!ticking) {
@@ -21647,17 +21657,226 @@
           }
       }, {passive: true});
 
-      arrow.addEventListener('click', function(e) {
-          e.stopPropagation();
-          if (currentCanto) {
-              currentCanto.scrollIntoView({
-                  behavior: 'smooth',
-                  block: 'start'
-              });
+      update();
+
+      // === USER-INITIATED SCROLL DETECTION ===
+      // Clear arrowTarget when the user makes a deliberate scroll
+      // input. Once cleared, the next arrow click is "fresh" — find
+      // current canto from scrollY, apply page-up logic.
+      //
+      // Three input modes: wheel (mouse / trackpad), touchstart
+      // (mobile), keydown (keyboard scrolling keys). Each ignores
+      // events targeted at the arrow itself, so tapping the arrow
+      // doesn't accidentally clear the chain (especially on mobile
+      // where touchstart fires before click).
+      //
+      // Also ignores events inside .npp (the right menu): the menu
+      // is independently scrollable (overflow-y:auto with 100+
+      // links), and scrolling within it doesn't move the document.
+      // Without this exception, scrolling the menu mid-back-chain
+      // would clear arrowTarget and break the back-chain.
+      document.addEventListener('wheel', function(e) {
+          if (arrow.contains(e.target)) return;
+          if (e.target.closest && e.target.closest('.npp')) return;
+          clearTarget();
+      }, {passive: true});
+      document.addEventListener('touchstart', function(e) {
+          if (arrow.contains(e.target)) return;
+          if (e.target.closest && e.target.closest('.npp')) return;
+          clearTarget();
+      }, {passive: true});
+      document.addEventListener('keydown', function(e) {
+          var k = e.key;
+          if (k === 'PageUp' || k === 'PageDown' || k === 'Home'
+              || k === 'End' || k === 'ArrowUp' || k === 'ArrowDown'
+              || k === ' ') {
+              clearTarget();
           }
       });
+
+      // Right-menu link clicks: SET arrowTarget to the target canto
+      // (not clear). This means clicking the arrow immediately after
+      // a menu jump uses the chain logic: arrowTarget = canto V →
+      // advance to canto IV. No reliance on scrollY-based detection
+      // for case 1 (no scroll between menu and arrow), so it's not
+      // sensitive to landing imprecision.
+      //
+      // If the user scrolls before clicking the arrow, the wheel /
+      // touchstart listeners above clear arrowTarget, so we fall
+      // through to fresh logic which handles scenarios 2 (scrolled
+      // down: go to current canto's start) and 3 (scrolled up:
+      // current canto is now the previous one, go to its start).
+      var rightMenu = document.querySelector('.npp');
+      if (rightMenu) {
+          rightMenu.addEventListener('click', function(e) {
+              if (!e.target || e.target.tagName !== 'A') return;
+              var href = e.target.getAttribute('href');
+              if (!href || href.charAt(0) !== '#') return;
+              var anchor = document.getElementById(href.slice(1));
+              if (!anchor) return;
+              var targetCanto = anchor.closest('.poema');
+              if (targetCanto) {
+                  arrowTarget = targetCanto;
+              }
+          });
+      }
+
+      arrow.addEventListener('click', function(e) {
+          // stopPropagation prevents the search bar's click-outside
+          // handler from closing the search when the arrow is tapped.
+          e.stopPropagation();
+
+          var target;
+
+          if (arrowTarget !== null) {
+              // === CHAIN: advance from previous arrow target ===
+              // Layout-shift-immune: arrowTarget is a stable DOM
+              // reference, set when the last arrow click decided
+              // where to go. Doesn't matter where scrollY actually
+              // ended up after late content-visibility shifts.
+              var idx = -1;
+              for (var i = 0; i < cantos.length; i++) {
+                  if (cantos[i] === arrowTarget) { idx = i; break; }
+              }
+              if (idx > 0) {
+                  target = cantos[idx - 1];
+              } else {
+                  return; // at canto I, nowhere further back
+              }
+          } else {
+              // === FRESH: find current canto from scrollY ===
+              // No prior arrow context (user scrolled manually, or
+              // first click of a session, or just clicked a menu
+              // link). Use the live scroll position to determine
+              // where we are.
+              var sy = window.scrollY;
+              var liveIdx = -1;
+              for (var ci = 0; ci < cantos.length; ci++) {
+                  var r = cantos[ci].getBoundingClientRect();
+                  var top = r.top + sy;
+                  var bot = top + r.height;
+                  if (top <= sy && bot > sy) {
+                      liveIdx = ci;
+                      break;
+                  }
+              }
+              if (liveIdx === -1) return;
+
+              // "At start" = within 5px of canto's top in viewport.
+              // After a deliberate manual scroll to a canto, this
+              // is reliable (no in-flight layout shifts).
+              var rect = cantos[liveIdx].getBoundingClientRect();
+              var atStart = rect.top > -5;
+
+              if (atStart) {
+                  if (liveIdx === 0) return;
+                  target = cantos[liveIdx - 1];
+              } else {
+                  target = cantos[liveIdx];
+              }
+          }
+
+          arrowTarget = target;
+          scrollToCantoStart(target);
+      });
+
+      function scrollToCantoStart(target) {
+          window.__currentChapterTarget = target;
+
+          // Force-render the target and a few neighbours on either
+          // side so their real heights are reflected in the layout
+          // BEFORE the scroll starts. Synchronous offsetHeight read
+          // commits the layout.
+          var targetIdx = -1;
+          for (var ti = 0; ti < cantos.length; ti++) {
+              if (cantos[ti] === target) { targetIdx = ti; break; }
+          }
+          if (targetIdx !== -1) {
+              for (var n = Math.max(0, targetIdx - 2);
+                   n <= Math.min(cantos.length - 1, targetIdx + 2);
+                   n++) {
+                  if (cantos[n].style.contentVisibility !== 'visible') {
+                      cantos[n].style.contentVisibility = 'visible';
+                  }
+              }
+              void document.body.offsetHeight;
+          }
+
+          smoothScrollToY(function() {
+              // For canto I specifically, scroll to the very top of
+              // the page (Y=0), not just to the .poema's top. This
+              // exposes the page title "LA DIVINA COMMEDIA" above
+              // canto I — feels right when navigating "all the way
+              // back" via the arrow. For any other canto, normal
+              // behaviour: land at its top.
+              if (target === cantos[0]) return 0;
+              var r = target.getBoundingClientRect();
+              return r.top + window.scrollY;
+          });
+      }
+
+      // Track pending post-settle setTimeout IDs across smoothScrollToY
+      // calls. When a new scroll starts, any post-settles still pending
+      // from previous scrolls must be cancelled — otherwise they fire
+      // (with their old closure's target captured) and snap the page
+      // back to where the previous scroll ended. Symptom: clicking the
+      // arrow rapidly to back-chain 100→99→98→97 feels "stuck" because
+      // old post-settles repeatedly snap you back to 99 mid-scroll.
+      var postSettleTimeouts = [];
+
+      function smoothScrollToY(yOrFn) {
+          // Cancel any pending post-settles from previous scrolls.
+          for (var p = 0; p < postSettleTimeouts.length; p++) {
+              clearTimeout(postSettleTimeouts[p]);
+          }
+          postSettleTimeouts = [];
+
+          var getY = (typeof yOrFn === 'function') ? yOrFn : function() { return yOrFn; };
+          window.__isClickScrolling = true;
+          var reduceMotion = window.matchMedia
+              && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+          function finish() {
+              window.scrollTo(0, Math.max(0, getY()));
+              window.__isClickScrolling = false;
+              window.dispatchEvent(new Event('scroll'));
+              window.__chapterUpRAF = null;
+              postSettleTimeouts.push(setTimeout(function() {
+                  window.scrollTo(0, Math.max(0, getY()));
+              }, 50));
+              postSettleTimeouts.push(setTimeout(function() {
+                  window.scrollTo(0, Math.max(0, getY()));
+              }, 200));
+              postSettleTimeouts.push(setTimeout(function() {
+                  window.scrollTo(0, Math.max(0, getY()));
+              }, 500));
+          }
+
+          if (reduceMotion) { finish(); return; }
+
+          if (window.__chapterUpRAF) cancelAnimationFrame(window.__chapterUpRAF);
+          var startTime = performance.now();
+          var startY = window.scrollY;
+          var duration = 400;
+          var stepFn = function(now) {
+              var t = Math.min((now - startTime) / duration, 1);
+              var eased = 1 - Math.pow(1 - t, 3);
+              var currentTargetY = getY();
+              var newY = startY + (currentTargetY - startY) * eased;
+              window.scrollTo(0, Math.max(0, newY));
+              if (t < 1) {
+                  window.__chapterUpRAF = requestAnimationFrame(stepFn);
+              } else {
+                  finish();
+              }
+          };
+          window.__chapterUpRAF = requestAnimationFrame(stepFn);
+      }
   });
   </script>
+
+<script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
+
 
 <script type="text/javascript" src="/unprotected/back_to_spaceship.js?hash=4975d460e508829e8fb64d3962bc44ad35f3a95a"></script>
 
